@@ -66,10 +66,14 @@ void FuncReturn(const tvm::relax::Expr& value);
 
 BlockFrame BindingBlock();
 BlockFrame Dataflow();
+void DataflowBlockOutput(const Array<tvm::relax::Var>& vars);
 
 ////////////////////////////// Bindings ////////////////////////////////
 
-tvm::relax::Var Emit(const tvm::relax::Expr& expr);
+tvm::relax::Var Emit(const tvm::relax::Expr& expr, String var_name);
+tvm::relax::Var EmitMatchShape(const tvm::relax::Expr& value, const Array<PrimExpr>& pattern,
+                               String var_name);
+void EmitMatchShapeWithoutVar(const tvm::relax::Expr& value, const Array<PrimExpr>& pattern);
 
 }  // namespace relax
 }  // namespace ir_builder

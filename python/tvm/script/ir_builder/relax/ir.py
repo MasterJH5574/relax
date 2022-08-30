@@ -17,7 +17,7 @@
 # pylint: disable=missing-docstring
 """IRBuilder for Relax"""
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from tvm._ffi import register_object as _register_object
 from tvm.ir import Attrs, Type
@@ -79,26 +79,27 @@ def func_return(type: Expr) -> Expr:
     return _ffi_api.FuncReturn(type)  # pylint: disable=no-member # type: ignore
 
 
-############################# BindingBlock ##############################
+############################# DataflowBlock ##############################
 
 
 def dataflow() -> frame.BlockFrame:
     return _ffi_api.Dataflow()  # pylint: disable=no-member # type: ignore
 
 
-def binding_block() -> frame.BlockFrame:
-    return _ffi_api.BindingBlock()  # pylint: disable=no-member # type: ignore
+def output(*vars: Tuple[Var]):
+    _ffi_api.DataflowBlockOutput(vars)
+    return vars
 
 
 ############################### Bindings ###############################
 
 
-def emit(expr: Expr) -> Var:
-    return _ffi_api.Emit(expr)  # type: ignore
+def emit(expr: Expr, var_name: str) -> Var:
+    return _ffi_api.Emit(expr, var_name)  # type: ignore
 
 
-def emit_match_shape(value: Expr, pattern: List[PrimExpr]) -> Var:
-    return _ffi_api.EmitMatchShape(value, pattern)  # type: ignore
+def emit_match_shape(value: Expr, pattern: List[PrimExpr], var_name: str) -> Var:
+    return _ffi_api.EmitMatchShape(value, pattern, var_name)  # type: ignore
 
 
 def emit_match_shape_without_var(value: Expr, pattern: List[PrimExpr]):
@@ -169,7 +170,6 @@ __all__ = [
     "TensorType",
     "add",
     "arg",
-    "binding_block",
     "builtin",
     "call_packed",
     "call_tir",
@@ -183,6 +183,7 @@ __all__ = [
     "function",
     "match_shape",
     "multiply",
+    "output",
     "ret_type",
     "tensor_decl",
 ]

@@ -46,28 +46,6 @@ class RelaxFrame : public IRBuilderFrame {
   RelaxFrame() = default;
 };
 
-class BlockFrameNode : public RelaxFrameNode {
- public:
-  bool is_dataflow;
-
-  void VisitAttrs(tvm::AttrVisitor* v) {
-    RelaxFrameNode::VisitAttrs(v);
-    v->Visit("is_dataflow", &is_dataflow);
-  }
-
-  static constexpr const char* _type_key = "script.ir_builder.relax.BlockFrame";
-  TVM_DECLARE_FINAL_OBJECT_INFO(BlockFrameNode, RelaxFrameNode);
-
- public:
-  void EnterWithScope() final;
-  void ExitWithScope() final;
-};
-
-class BlockFrame : public RelaxFrame {
- public:
-  TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(BlockFrame, RelaxFrame, BlockFrameNode);
-};
-
 class FunctionFrameNode : public RelaxFrameNode {
  public:
   Optional<String> name;
@@ -77,7 +55,6 @@ class FunctionFrameNode : public RelaxFrameNode {
   Array<tvm::relax::BindingBlock> binding_blocks;
   Array<tvm::relax::Expr> outputs;
   tvm::relax::BlockBuilder block_builder;
-  BlockFrame default_binding_block_frame{nullptr};
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     RelaxFrameNode::VisitAttrs(v);
@@ -88,7 +65,6 @@ class FunctionFrameNode : public RelaxFrameNode {
     v->Visit("binding_blocks", &binding_blocks);
     v->Visit("outputs", &outputs);
     // `block_builder` is not visited.
-    // `default_binding_block_frame` is not visited.
   }
 
   static constexpr const char* _type_key = "script.ir_builder.relax.FunctionFrame";
@@ -102,6 +78,49 @@ class FunctionFrameNode : public RelaxFrameNode {
 class FunctionFrame : public RelaxFrame {
  public:
   TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(FunctionFrame, RelaxFrame, FunctionFrameNode);
+};
+
+class BlockFrameNode : public RelaxFrameNode {
+ public:
+  bool is_dataflow;
+  Optional<Array<String>> output_var_names;
+
+  // The following fields are only be used when this frame is a dataflow block frame.
+  /*!
+   * \brief A boolean indicating if the dataflow block is ended of construction. If it is true, any
+   * new binding trying to be emitted into this block will cause an error.
+   */
+  bool block_ended;
+  /*!
+   * \brief A name table used to get unique variable names when constructing a dataflow block.
+   * \details Since dataflow block will be visited twice during construction, in order to keep the
+   * new variable names consistent in both visits, we keep a copy of the block builder's name table
+   * when the block frame is being initialized. In the first visit of a dataflow block, we use the
+   * block builder's internal name table to get unique variable names. In the second visit, we use
+   * this name table for the same purpose. Since in both visits the bindings being emitted are
+   * always the same, the new variable names will be consistent with this copy of name table.
+   */
+  tvm::relax::NameTable name_table;
+
+  void VisitAttrs(tvm::AttrVisitor* v) {
+    RelaxFrameNode::VisitAttrs(v);
+    v->Visit("is_dataflow", &is_dataflow);
+    v->Visit("output_var_names", &output_var_names);
+    // `block_ended` is not visited
+    // `name_table` is not visited
+  }
+
+  static constexpr const char* _type_key = "script.ir_builder.relax.BlockFrame";
+  TVM_DECLARE_FINAL_OBJECT_INFO(BlockFrameNode, RelaxFrameNode);
+
+ public:
+  void EnterWithScope() final;
+  void ExitWithScope() final;
+};
+
+class BlockFrame : public RelaxFrame {
+ public:
+  TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(BlockFrame, RelaxFrame, BlockFrameNode);
 };
 
 }  // namespace relax
