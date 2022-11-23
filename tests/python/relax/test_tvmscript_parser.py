@@ -734,5 +734,26 @@ def test_other_cases():
         return R.print(x, format="{}")
 
 
+def test_call_tir_explicit_symbolic_var_passing():
+    @I.ir_module
+    class Module:
+        @T.prim_func
+        def add(var_A: T.handle, var_B: T.handle, m: T.int64):
+            T.func_attr({"global_symbol": "add", "tir.noalias": True})
+            A = T.match_buffer(var_A, [m], dtype="float32")
+            B = T.match_buffer(var_B, [m], dtype="float32")
+            for i0 in T.serial(m):
+                with T.block("B"):
+                    i0_1 = T.axis.spatial(m, i0)
+                    T.reads(A[i0_1])
+                    T.writes(B[i0_1])
+                    B[i0_1] = A[i0_1] + T.float32(1)
+
+        @R.function
+        def main(x: R.Tensor(("n",), "float32")):
+            gv = R.call_tir(add, (x,), (n,), dtype="float32", tir_vars=(n,))
+            return gv
+
+
 if __name__ == "__main__":
     tvm.testing.main()
