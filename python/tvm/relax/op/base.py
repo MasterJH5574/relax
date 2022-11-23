@@ -62,7 +62,6 @@ def call_tir(
     """
     if isinstance(tir_vars, (tuple, list)):
         tir_vars = ShapeExpr(tir_vars)
-    assert all(isinstance(value, tvm.tir.Var) for value in tir_vars.values)
 
     if isinstance(func, str):
         func = ExternFunc(func)
