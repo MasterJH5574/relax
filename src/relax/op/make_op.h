@@ -44,6 +44,8 @@ Expr MakeVMAllocStorage(Expr size, DataType dtype, int64_t runtime_device_index)
 
 Expr MakeVMAllocTensor(Expr storage, Expr shape, int offset, DataType dtype);
 
+Expr MakeVMReshape(Expr data, Expr new_shape);
+
 Expr MakeCast(Expr data, DataType dtype);
 
 }  // namespace relax

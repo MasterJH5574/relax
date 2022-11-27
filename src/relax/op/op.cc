@@ -417,5 +417,87 @@ RELAX_REGISTER_OP("relax.vm.call_tir_dyn")
                   "The input arguments (list of tensors and last argument is ShapeExpr)")
     .set_attr<FInferType>("FInferType", ReturnVoidType);
 
+// vm builtin reshape
+RELAX_REGISTER_OP("relax.vm.builtin.reshape")
+    .set_num_inputs(2)
+    .add_argument("data", "Tensor", "The tensor to be reshaped.")
+    .add_argument("new_shape", "ShapeExpr", "The input new shape.")
+    .set_attr<FInferShape>(
+        "FInferShape",
+        [](const Call& call, DiagnosticContext diag_ctx) -> Optional<Expr> {
+          if (call->args.size() != 2) {
+            diag_ctx.EmitFatal(Diagnostic::Error(call->span)
+                               << "VM builtin reshape op should have 2 argument");
+          }
+          const auto* shape = call->args[0]->shape().as<ShapeExprNode>();
+          const auto* new_shape = call->args[1].as<ShapeExprNode>();
+          if (shape == nullptr) {
+            diag_ctx.EmitFatal(Diagnostic::Error(call->span)
+                               << "VM builtin reshape op expects the input tensor have a known "
+                                  "static shape. However, the input tensor shape is "
+                               << call->args[0]->shape());
+          }
+          if (new_shape == nullptr) {
+            diag_ctx.EmitFatal(Diagnostic::Error(call->span)
+                               << "VM builtin reshape op expects the input new shape is a known "
+                                  "static shape. However, the input new shape is "
+                               << call->args[1]);
+          }
+
+          auto f_calc_shape_prod = [&diag_ctx, &call](const Array<PrimExpr>& shape) -> int64_t {
+            int64_t shape_prod = 1ll;
+            for (const PrimExpr& dim_len : shape) {
+              const int64_t* v_dim_len = tir::as_const_int(dim_len);
+              if (v_dim_len == nullptr) {
+                diag_ctx.EmitFatal(
+                    Diagnostic::Error(call->span)
+                    << "VM builtin reshape op expects the input tensor shape and new shape to be "
+                       "static. However, the input tensor shape or new shape contains "
+                    << dim_len << ", which is not static.");
+              }
+              shape_prod *= *v_dim_len;
+            }
+            return shape_prod;
+          };
+
+          int64_t input_shape_prod = f_calc_shape_prod(shape->values);
+          int64_t new_shape_prod = f_calc_shape_prod(new_shape->values);
+          if (new_shape_prod != input_shape_prod) {
+            diag_ctx.EmitFatal(
+                Diagnostic::Error(call->span)
+                << "VM builtin reshape operator expects the input new shape to be consistent with "
+                   "the input tensor shape. However, the input tensor shape is "
+                << GetRef<ShapeExpr>(shape) << " while the input new shape is "
+                << GetRef<ShapeExpr>(new_shape));
+          }
+          return call->args[1];
+        })
+    .set_attr<FInferType>("FInferType", [](const Call& call, DiagnosticContext diag_ctx) -> Type {
+      if (call->args.size() != 2) {
+        diag_ctx.EmitFatal(Diagnostic::Error(call->span)
+                           << "VM builtin reshape op should have 2 argument");
+      }
+      const auto* input_type = call->args[0]->checked_type().as<DynTensorTypeNode>();
+      const auto* new_shape = call->args[1].as<ShapeExprNode>();
+      if (input_type == nullptr) {
+        diag_ctx.EmitFatal(Diagnostic::Error(call->span)
+                           << "The op input should has type DynTensorType, but actually it is "
+                           << call->args[0]->checked_type()->GetTypeKey()
+                           << ". Please make sure the input has type DynTensorType.");
+      }
+      if (new_shape == nullptr) {
+        diag_ctx.EmitFatal(Diagnostic::Error(call->span)
+                           << "VM builtin reshape op expects the input new shape is a known "
+                              "static shape. However, the input new shape is "
+                           << call->args[1]);
+      }
+      return DynTensorType(new_shape->values.size(), input_type->dtype);
+    });
+
+Expr MakeVMReshape(Expr data, Expr new_shape) {
+  static const Op& op = Op::Get("relax.vm.builtin.reshape");
+  return Call(op, {data, new_shape}, Attrs(), {});
+}
+
 }  // namespace relax
 }  // namespace tvm

@@ -81,6 +81,18 @@ def LambdaLift():
     return _ffi_api.LambdaLift()  # type: ignore
 
 
+def RewriteDataflowReshape():
+    """
+    Transform all reshape within dataflow block to a specialized reshape operator, which will
+    be used for memory planning.
+
+    Returns
+    -------
+    ret: tvm.ir.transform.Pass
+    """
+    return _ffi_api.RewriteDataflowReshape()  # type: ignore
+
+
 def ToNonDataflow() -> tvm.ir.transform.Pass:
     """Transform all dataflow structure to non-dataflow version.
 
@@ -354,8 +366,8 @@ def CutlassCodegen() -> tvm.ir.transform.Pass:
 
 
 def SplitCutlass() -> tvm.ir.transform.Pass:
-    """Split a PrimFunc into 2 parts: the first part is a TIR PrimFunc which is  
-       matched with some cutlass kernels, and the second part is the rest of the original 
+    """Split a PrimFunc into 2 parts: the first part is a TIR PrimFunc which is
+       matched with some cutlass kernels, and the second part is the rest of the original
        PrimFunc that is not fused with cutlass kernels.
 
     Returns
@@ -508,8 +520,7 @@ def function_pass(
 
     required = required if required else []
     if not isinstance(required, (list, tuple)):
-        raise TypeError(
-            "Required is expected to be the type of " + "list/tuple.")
+        raise TypeError("Required is expected to be the type of " + "list/tuple.")
 
     def create_function_pass(pass_arg):
         """Internal function that creates a function pass"""
@@ -658,13 +669,11 @@ def dataflowblock_pass(
     """
 
     if opt_level is None:
-        raise ValueError(
-            "Please provide opt_level for the dataflowblock pass.")
+        raise ValueError("Please provide opt_level for the dataflowblock pass.")
 
     required = required if required else []
     if not isinstance(required, (list, tuple)):
-        raise TypeError(
-            "Required is expected to be the type of " + "list/tuple.")
+        raise TypeError("Required is expected to be the type of " + "list/tuple.")
 
     def create_dataflowblock_pass(pass_arg):
         """Internal function that creates a dataflowblock pass"""
@@ -673,8 +682,7 @@ def dataflowblock_pass(
         if inspect.isclass(pass_arg):
             return _wrap_class_dataflowblock_pass(pass_arg, info)
         if not isinstance(pass_arg, (types.FunctionType, types.LambdaType)):
-            raise TypeError(
-                "pass_func must be a callable for DataflowBlock pass")
+            raise TypeError("pass_func must be a callable for DataflowBlock pass")
         return _ffi_api.MakeDataflowBlockPass(pass_arg, info)  # type: ignore
 
     if pass_func:
