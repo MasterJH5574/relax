@@ -134,6 +134,10 @@ TVM_REGISTER_GLOBAL("vm.builtin.alloc_storage")
 
 TVM_REGISTER_GLOBAL("vm.builtin.alloc_tensor").set_body_method<Storage>(&StorageObj::AllocNDArray);
 
+TVM_REGISTER_GLOBAL("vm.builtin.reshape").set_body_typed([](NDArray data, ShapeTuple new_shape) {
+  return data.CreateView(new_shape, data->dtype);
+});
+
 TVM_REGISTER_GLOBAL("vm.binary_broadcast_shape_infer")
     .set_body_typed([](ShapeTuple lhs_shape, ShapeTuple rhs_shape) {
       std::vector<int64_t> output_shape;

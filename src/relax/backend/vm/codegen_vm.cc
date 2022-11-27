@@ -138,6 +138,8 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
         return EmitAllocTensor(call);
       } else if (call_node->op == store_shape_op_ || call_node->op == load_shape_op_) {
         return EmitShape(call);
+      } else if (call_node->op == reshape_op_) {
+        return EmitReshape(call);
       } else if (call_node->op == call_tir_dyn_op_) {
         return EmitTirDynOp(call);
       } else if (call_node->op == make_closure_op_) {
@@ -354,6 +356,20 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
     return Instruction::Arg(Instruction::kRegister, dst_register);
   }
 
+  Instruction::Arg EmitReshape(const Call& call_node) {
+    ICHECK_EQ(call_node->args.size(), 2)
+        << "Call to `relax.vm.builtin.reshape` should have two arguments exactly - one for the "
+           "tensor being reshaped, and another for the new shape.";
+    std::vector<Instruction::Arg> args;
+    args.reserve(2);
+    args.push_back(ConvertArg(call_node->args[0]));
+    args.push_back(ConvertArg(call_node->args[1]));
+
+    size_t dst_register = NewRegister();
+    builder_->EmitCall("vm.builtin.reshape", args, dst_register);
+    return Instruction::Arg(Instruction::kRegister, dst_register);
+  }
+
   Instruction::Arg EmitTirDynOp(const Call& call_node) {
     ICHECK(call_node->args.size() == 2);
     ICHECK(call_node->args[0]->IsInstance<GlobalVarNode>());
@@ -542,6 +558,7 @@ class CodeGenVM : public ExprFunctor<Instruction::Arg(const Expr&)> {
   const Op& alloc_tensor_op_ = Op::Get("relax.vm.builtin.alloc_tensor");
   const Op& store_shape_op_ = Op::Get("relax.vm.builtin.store_shape");
   const Op& load_shape_op_ = Op::Get("relax.vm.builtin.load_shape");
+  const Op& reshape_op_ = Op::Get("relax.vm.builtin.reshape");
   const Op& call_tir_dyn_op_ = Op::Get("relax.vm.call_tir_dyn");
   const Op& unique_op_ = Op::Get("relax.unique");
   const Op& print_op_ = Op::Get("relax.print");

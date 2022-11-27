@@ -69,5 +69,38 @@ def test_minimum_example():
     tvm.testing.assert_allclose(y_relax.numpy(), y_np, rtol=1e-5, atol=1e-5)
 
 
+def test_reshape_param():
+    x = relax.Var("x", (2, 50), relax.DynTensorType(2, "float32"))
+    y = relax.Var("y", (100,), relax.DynTensorType(2, "float32"))
+
+    bb = relax.BlockBuilder()
+    with bb.function("main", [x,y ]):
+        with bb.dataflow():
+            v0 = bb.emit_te(topi.reshape, x, (2, 25, 2))
+            v1 = bb.emit_te(topi.reshape, y, (2, 25, 2))
+            gv = bb.emit_output(bb.call_te(topi.add, v0, v1))
+        bb.emit_func_output(gv)
+    
+    mod = bb.get()
+    mod = apply_initializing_passes(mod)
+    mod = relax.transform.VMGraphMemoryPlan()(mod)
+
+    dev = tvm.cpu(0)
+    exec = relax.vm.build(bb.get(), "llvm")
+    vm = relax.VirtualMachine(exec, dev)
+
+    x_np = np.random.rand(2, 50).astype("float32")
+    y_np = np.random.rand(100).astype("float32")
+    output_np = x_np.reshape(2, 25, 2) + y_np.reshape(2, 25, 2)
+
+    x_relax = tvm.nd.array(x_np, dev)
+    y_relax = tvm.nd.array(y_np, dev)
+    output_relax = vm["main"](x_relax, y_relax)
+
+    tvm.testing.assert_allclose(output_relax.numpy(), output_np, rtol=1e-5, atol=1e-5)
+
+
 if __name__ == "__main__":
     test_minimum_example()
+    test_reshape_param()
+    # Todo: check dtype consistency

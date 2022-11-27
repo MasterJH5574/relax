@@ -553,8 +553,7 @@ class StorageAllocator : public StorageAllocatorBaseVisitor {
       return;
     } else if (call->op == vm_reshape_op) {
       TokenContainer token = GetTokens(call->args[0]);
-      ICHECK(!token.is_tuple);
-      ICHECK_NOTNULL(token.token);
+      ICHECK(!token.is_tuple || token.IsEmptyToken());
       alloc_tensor2token[call] = token.token;
       ExprUsesTokens(call, token);
       return;
@@ -662,10 +661,18 @@ class StorageAllocationRewriter : public ExprMutator {
   Expr VisitExpr_(const CallNode* call) final {
     auto it = alloc_tensor2token_.find(call);
     if (it != alloc_tensor2token_.end()) {
+      static const Op& vm_reshape_op = Op::Get("relax.vm.builtin.reshape");
       StorageToken* token = it->second;
+      if (token == nullptr) {
+        // If the corresponding token does not exist, it means that the source tensor is an external
+        // referenced tensor. Therefore, we keep this Call as it is, and let the VM codegen to
+        // handle this case by creating a view to reuse the memory of the source NDArray at runtime.
+        ICHECK(call->op == vm_reshape_op);
+        return GetRef<Call>(call);
+      }
+
       const auto* tensor_type = call->checked_type().as<DynTensorTypeNode>();
       ICHECK_NOTNULL(tensor_type);
-
       const auto* attrs = call->attrs.as<AllocTensorAttrs>();
       if (attrs != nullptr) {
         // - If the token is visited for the first time, create a storage variable using
@@ -678,7 +685,6 @@ class StorageAllocationRewriter : public ExprMutator {
           token->storage = builder_->Emit(alloc_storage, "storage");
         }
       } else {
-        static const Op& vm_reshape_op = Op::Get("relax.vm.builtin.reshape");
         ICHECK(call->op == vm_reshape_op);
         ICHECK(token->storage.defined());
       }
