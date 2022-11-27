@@ -251,8 +251,7 @@ class VirtualMachine(object):
         # kwargs can be a super set of the required function parameters.
         # We only find the ones that are needed.
         func_arity = self._get_function_arity(func_name)
-        func_params = [self._get_function_param_name(
-            func_name, i) for i in range(func_arity)]
+        func_params = [self._get_function_param_name(func_name, i) for i in range(func_arity)]
         new_args = [None] * len(func_params)
         cnt = 0
         for k in kwargs:
@@ -261,8 +260,7 @@ class VirtualMachine(object):
                 new_args[idx] = kwargs[k]
                 cnt += 1
             else:
-                print(
-                    f'Warning: Keyword argument "{k}" is unused in {func_name}')
+                print(f'Warning: Keyword argument "{k}" is unused in {func_name}')
         assert len(args) + cnt == len(func_params)
         idx = 0
         for i, arg in enumerate(new_args):
@@ -503,7 +501,9 @@ def build(
     if isinstance(target, str):
         target = tvm.target.Target(target)
 
-    passes = [relax.transform.ToNonDataflow()]
+    passes = []
+    passes.append(relax.transform.RewriteDataflowReshape())
+    passes.append(relax.transform.ToNonDataflow())
     passes.append(relax.transform.CallTIRRewrite())
     passes.append(relax.transform.VMGraphMemoryPlan())
     passes.append(relax.transform.VMMemoryLower())

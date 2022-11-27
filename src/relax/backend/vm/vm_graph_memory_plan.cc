@@ -378,8 +378,12 @@ class StorageAllocatorInit : public StorageAllocatorBaseVisitor {
 
   void VisitExpr_(const CallNode* call) final {
     static const Op& alloc_tensor_op = Op::Get("relax.builtin.alloc_tensor");
+    static const Op& vm_reshape_op = Op::Get("relax.vm.builtin.reshape");
     if (call->op == alloc_tensor_op) {
       this->CreateToken(call);
+      return;
+    } else if (call->op == vm_reshape_op) {
+      ExprUsesTokens(call, GetTokens(call->args[0]));
       return;
     }
 
@@ -493,10 +497,10 @@ class StorageAllocator : public StorageAllocatorBaseVisitor {
   std::string DumpMemoryAllocation() const { return allocator_.DumpMemoryAllocation(); }
 
   /*!
-   * \brief The mapping from each memory-reusable `builtin.alloc_tensor` to its corresponding
-   * underlying storage token that it is using.
+   * \brief The mapping from each memory-reusable `builtin.alloc_tensor` or `vm.builtin.reshape`
+   * to its corresponding underlying storage token that it is using.
    */
-  std::unordered_map<const CallNode*, StorageToken*> alloc_tensor2token;
+  std::unordered_map<const ExprNode*, StorageToken*> alloc_tensor2token;
   /*! \brief The mapping from each Expr to the tensors that need to be killed after it. */
   std::unordered_map<const ExprNode*, std::vector<Var>> expr2killed_tensors;
   /*! \brief The mapping from each binding block to the storage tokens that are create inside. */
@@ -514,19 +518,18 @@ class StorageAllocator : public StorageAllocatorBaseVisitor {
 
   void VisitBinding_(const VarBindingNode* binding) final {
     StorageAllocatorBaseVisitor::VisitBinding_(binding);
-    // If the binding is a memory-reusable `builtin.alloc_tensor`, map its underlying token to this
-    // binding var, indicating that the token is currently occupied by this binding var.
-    if (const CallNode* call_alloc_tensor = binding->value.as<CallNode>()) {
-      auto it = alloc_tensor2token.find(call_alloc_tensor);
-      if (it != alloc_tensor2token.end()) {
-        auto it_insert = token2cur_tensor_.insert({it->second, binding->var});
-        ICHECK(it_insert.second == true);
-      }
+    // If the binding is a memory-reusable `builtin.alloc_tensor` or `vm.builtin.reshape`, mark that
+    // the underlying token is used by the variable of this binding.
+    auto it = alloc_tensor2token.find(binding->value.get());
+    if (it != alloc_tensor2token.end()) {
+      ICHECK(binding->value->IsInstance<CallNode>());
+      token2cur_tensor_[it->second].push_back(binding->var);
     }
   }
 
   void VisitExpr_(const CallNode* call) final {
     static const Op& alloc_tensor_op = Op::Get("relax.builtin.alloc_tensor");
+    static const Op& vm_reshape_op = Op::Get("relax.vm.builtin.reshape");
     if (call->op == alloc_tensor_op) {
       auto it = token_map_.find(call);
       ICHECK(it != token_map_.end());
@@ -547,6 +550,13 @@ class StorageAllocator : public StorageAllocatorBaseVisitor {
           call, TokenContainer(/*is_tuple=*/false, /*field_containers=*/{}, /*token=*/new_token));
       ICHECK(!block_stack_.empty());
       block2tokens[block_stack_.back()].insert(new_token);
+      return;
+    } else if (call->op == vm_reshape_op) {
+      TokenContainer token = GetTokens(call->args[0]);
+      ICHECK(!token.is_tuple);
+      ICHECK_NOTNULL(token.token);
+      alloc_tensor2token[call] = token.token;
+      ExprUsesTokens(call, token);
       return;
     }
 
@@ -579,7 +589,8 @@ class StorageAllocator : public StorageAllocatorBaseVisitor {
 
       auto it = token2cur_tensor_.find(token);
       ICHECK(it != token2cur_tensor_.end());
-      expr2killed_tensors[release_site].push_back(it->second);
+      std::vector<Var>& killed_tensors = expr2killed_tensors[release_site];
+      killed_tensors.insert(killed_tensors.end(), it->second.begin(), it->second.end());
       token2cur_tensor_.erase(it);
     }
   }
@@ -588,14 +599,14 @@ class StorageAllocator : public StorageAllocatorBaseVisitor {
   int n_storage_{0};
   /*! \brief The 1D memory allocator */
   TokenAllocator1D allocator_;
-  /*! \brief The mapping from each token to the tensor that is currently occupying it */
-  std::unordered_map<const StorageToken*, Var> token2cur_tensor_;
+  /*! \brief The mapping from each token to the tensors that are currently using it */
+  std::unordered_map<const StorageToken*, std::vector<Var>> token2cur_tensor_;
 };
 
 class StorageAllocationRewriter : public ExprMutator {
  public:
   explicit StorageAllocationRewriter(
-      std::unordered_map<const CallNode*, StorageToken*> alloc_tensor2token,
+      std::unordered_map<const ExprNode*, StorageToken*> alloc_tensor2token,
       std::unordered_map<const ExprNode*, std::vector<Var>> expr2killed_tensors,
       std::unordered_map<const BindingBlockNode*, std::unordered_set<const StorageToken*>>
           block2tokens,
@@ -652,28 +663,36 @@ class StorageAllocationRewriter : public ExprMutator {
     auto it = alloc_tensor2token_.find(call);
     if (it != alloc_tensor2token_.end()) {
       StorageToken* token = it->second;
+      const auto* tensor_type = call->checked_type().as<DynTensorTypeNode>();
+      ICHECK_NOTNULL(tensor_type);
+
       const auto* attrs = call->attrs.as<AllocTensorAttrs>();
-      ICHECK_NOTNULL(attrs);
-      // - If the token is visited for the first time, create a storage variable using
-      // `memory.alloc_storage` for it.
-      // - And always create a `memory.alloc_tensor` for the old `builtin.alloc_tensor`.
-      if (!token->storage.defined()) {
-        ShapeExpr size({tir::make_const(DataType::Int(64), token->bytes)});
-        Call alloc_storage = Downcast<Call>(
-            MakeAllocStorage(std::move(size), attrs->runtime_device_index, "global", token->dtype));
-        token->storage = builder_->Emit(alloc_storage, "storage");
+      if (attrs != nullptr) {
+        // - If the token is visited for the first time, create a storage variable using
+        // `memory.alloc_storage` for it.
+        // - And always create a `memory.alloc_tensor` for the old `builtin.alloc_tensor`.
+        if (!token->storage.defined()) {
+          ShapeExpr size({tir::make_const(DataType::Int(64), token->bytes)});
+          Call alloc_storage = Downcast<Call>(MakeAllocStorage(
+              std::move(size), attrs->runtime_device_index, "global", token->dtype));
+          token->storage = builder_->Emit(alloc_storage, "storage");
+        }
+      } else {
+        static const Op& vm_reshape_op = Op::Get("relax.vm.builtin.reshape");
+        ICHECK(call->op == vm_reshape_op);
+        ICHECK(token->storage.defined());
       }
-      return MakeMemAllocTensor(token->storage, call->args[0], /*offset=*/0, attrs->dtype);
+      return MakeMemAllocTensor(token->storage, call->shape(), /*offset=*/0, tensor_type->dtype);
     }
 
     return ExprMutator::VisitExpr_(call);
   }
 
   /*!
-   * \brief The mapping from each memory-reusable `builtin.alloc_tensor` to its corresponding
-   * underlying storage token that it is using.
+   * \brief The mapping from each memory-reusable `builtin.alloc_tensor` or `vm.builtin.reshape`
+   * to its corresponding underlying storage token that it is using.
    */
-  std::unordered_map<const CallNode*, StorageToken*> alloc_tensor2token_;
+  std::unordered_map<const ExprNode*, StorageToken*> alloc_tensor2token_;
   /*! \brief The mapping from each Expr to the tensors that need to be killed after it. */
   std::unordered_map<const ExprNode*, std::vector<Var>> expr2killed_tensors_;
   /*! \brief The mapping from each binding block to the storage tokens that are create inside. */

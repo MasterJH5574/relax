@@ -23,6 +23,7 @@ import numpy as np
 
 
 def apply_initializing_passes(mod: IRModule):
+    mod = relax.transform.RewriteDataflowReshape()(mod)
     mod = relax.transform.ToNonDataflow()(mod)
     mod = relax.transform.CallTIRRewrite()(mod)
     return mod
@@ -34,13 +35,14 @@ def test_minimum_example():
 
     bb = relax.BlockBuilder()
     with bb.function("main", [x]):
-        v0 = bb.emit_te(topi.exp, x)
-        v1 = bb.emit_te(topi.reshape, v0, (8,))
-        v2 = bb.emit_te(topi.nn.relu, v1)
-        v3 = bb.emit_te(topi.add, v2, const_one)
-        v4 = bb.emit_te(topi.nn.pad, v3, pad_before=[1], pad_after=[1], pad_value=1)
-        v5 = bb.emit_te(topi.log, v4)
-        bb.emit_func_output(v5)
+        with bb.dataflow():
+            v0 = bb.emit_te(topi.exp, x)
+            v1 = bb.emit_te(topi.reshape, v0, (8,))
+            v2 = bb.emit_te(topi.nn.relu, v1)
+            v3 = bb.emit_te(topi.add, v2, const_one)
+            v4 = bb.emit_te(topi.nn.pad, v3, pad_before=[1], pad_after=[1], pad_value=1)
+            gv = bb.emit_output(bb.call_te(topi.log, v4))
+        bb.emit_func_output(gv)
 
     mod = bb.get()
     mod = apply_initializing_passes(mod)
