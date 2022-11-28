@@ -20,13 +20,10 @@
  * \file src/relax/transform/rewrite_dataflow_reshape.cc
  * \brief Transform all reshape within dataflow block to a specialized reshape operator
  */
-#include <tvm/relax/attrs/memory.h>
+#include <tvm/relax/analysis.h>
 #include <tvm/relax/expr_functor.h>
 #include <tvm/relax/transform.h>
-#include <tvm/relax/type.h>
-#include <tvm/tir/op.h>
 
-#include "../../support/utils.h"
 #include "../op/make_op.h"
 
 namespace tvm {
@@ -71,8 +68,9 @@ class DataflowReshapeRewriter : public ExprMutator {
       return false;
     }
     GlobalVar gv = Downcast<GlobalVar>(call->args[0]);
-    return support::StartsWith(gv->name_hint, "reshape");
-    // Todo
+    const auto* func = mod_->functions.Get(gv).as<tir::PrimFuncNode>();
+    ICHECK_NOTNULL(func);
+    return HasReshapePattern(GetRef<tir::PrimFunc>(func));
   }
 
   const IRModule& mod_;
