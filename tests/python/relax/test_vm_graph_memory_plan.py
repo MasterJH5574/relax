@@ -45,7 +45,9 @@ def test_minimum_example():
         bb.emit_func_output(gv)
 
     mod = bb.get()
+    print(mod["main"].script())
     mod = apply_initializing_passes(mod)
+    print(mod["main"].script())
     mod = relax.transform.VMGraphMemoryPlan()(mod)
     print("After plan:")
     print(mod["main"].script())
@@ -82,8 +84,12 @@ def test_reshape_param():
         bb.emit_func_output(gv)
     
     mod = bb.get()
+    print(mod["main"].script())
     mod = apply_initializing_passes(mod)
+    print(mod["main"].script())
     mod = relax.transform.VMGraphMemoryPlan()(mod)
+    print("After plan:")
+    print(mod["main"].script())
 
     dev = tvm.cpu(0)
     exec = relax.vm.build(bb.get(), "llvm")
@@ -104,3 +110,4 @@ if __name__ == "__main__":
     test_minimum_example()
     test_reshape_param()
     # Todo: check dtype consistency
+    # Todo: test for reshape detection, including expand_dims and squeeze

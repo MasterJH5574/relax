@@ -505,11 +505,24 @@ def build(
     passes.append(relax.transform.RewriteDataflowReshape())
     passes.append(relax.transform.ToNonDataflow())
     passes.append(relax.transform.CallTIRRewrite())
-    passes.append(relax.transform.VMGraphMemoryPlan())
-    passes.append(relax.transform.VMMemoryLower())
-    passes.append(relax.transform.VMShapeLower())
+    # passes.append(relax.transform.VMGraphMemoryPlan())
+    # passes.append(relax.transform.VMMemoryLower())
+    # passes.append(relax.transform.VMShapeLower())
     seq = tvm.transform.Sequential(passes)
     new_mod = seq(mod)
+
+    # print("Before planning:\n")
+    # print(new_mod["main"].script())
+
+    new_mod = relax.transform.VMGraphMemoryPlan()(new_mod)
+    # print("After planning:\n")
+    # print(new_mod["main"].script())
+
+    new_mod = relax.transform.VMMemoryLower()(new_mod)
+    new_mod = relax.transform.VMShapeLower()(new_mod)
+
+    # print(new_mod["main"].script())
+    # exit(0)
 
     # Split primfunc and relax function
     rx_mod, tir_mod = _split_tir_relax(new_mod)

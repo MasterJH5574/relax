@@ -717,6 +717,7 @@ Expr VMGraphMemoryPlan(Function func) {
   StorageAllocator allocator(std::move(token_map), &arena);
   allocator(func);
   // Dump the memory allocation information by using `allocator.DumpMemoryAllocation()`.
+  LOG(INFO) << "\n" << allocator.DumpMemoryAllocation();
   // Step 3. Rewrite the function.
   StorageAllocationRewriter rewriter(std::move(allocator.alloc_tensor2token),
                                      std::move(allocator.expr2killed_tensors),
