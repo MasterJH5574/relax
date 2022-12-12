@@ -208,15 +208,19 @@ def _nn_batch_norm(bb: BlockBuilder, args: List[Expr], attrs: Attrs, output_shap
 
 
 def _nn_layer_norm(bb: BlockBuilder, args: List[Expr], attrs: Attrs, output_shape: Expr):
-    def layer_norm(x, gamma, beta, axis, eps):
-        shape_prod = tvm.tir.const(1, "int32")
-        for dim in axis:
-            shape_prod = shape_prod * x.shape[dim.value]
-        mean = topi.sum(x, axis=axis, keepdims=True) / shape_prod
-        var = topi.sum((x - mean) * (x - mean), axis=axis, keepdims=True) / shape_prod
-        return gamma * ((x - mean) / topi.sqrt(var + eps)) + beta
+    return bb.call_te(
+        topi.nn.layer_norm, args[0], args[1], args[2], axis=attrs.axis, epsilon=attrs.epsilon
+    )
 
-    return bb.call_te(layer_norm, args[0], args[1], args[2], axis=attrs.axis, eps=attrs.epsilon)
+    # def layer_norm(x, gamma, beta, axis, eps):
+    #     shape_prod = tvm.tir.const(1, "int32")
+    #     for dim in axis:
+    #         shape_prod = shape_prod * x.shape[dim.value]
+    #     mean = topi.sum(x, axis=axis, keepdims=True) / shape_prod
+    #     var = topi.sum((x - mean) * (x - mean), axis=axis, keepdims=True) / shape_prod
+    #     return gamma * ((x - mean) / topi.sqrt(var + eps)) + beta
+
+    # return bb.call_te(layer_norm, args[0], args[1], args[2], axis=attrs.axis, eps=attrs.epsilon)
 
 
 def _nn_matmul(bb: BlockBuilder, args: List[Expr], attrs: Attrs, output_shape: Expr):
@@ -379,7 +383,7 @@ class OperatorLegalizer(PyExprMutator):
             if not isinstance(func, Function):
                 continue
             updated_func = self.visit_expr(func)
-            updated_func = remove_all_unused(updated_func)
+            # updated_func = remove_all_unused(updated_func)
             self.builder_.update_func(global_var, updated_func)
 
         return self.builder_.get()
