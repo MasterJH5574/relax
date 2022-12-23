@@ -21,7 +21,8 @@ import tvm
 from tvm.runtime.object import Object
 
 from . import _ffi_api
-from ..expr import Expr, ShapeExpr, Tuple, Call, ExternFunc
+from ..expr import Expr, ShapeExpr, Tuple, Call, ExternFunc, _update_struct_info
+from ..struct_info import ShapeStructInfo, TupleStructInfo
 from ..ty import DynTensorType, TupleType
 from ...ir import Array, Type, PrimExpr
 
@@ -63,6 +64,17 @@ def call_tir(
     if isinstance(func, str):
         func = ExternFunc(func)
 
+    if isinstance(args, Expr):
+        args = Tuple((args,))
+    elif isinstance(args, (list, tuple)):
+        args = Tuple(args)
+
+    # =================== Construct the output shape ===================
+    def _is_list_of_pod_values(l) -> bool:
+        return isinstance(l, (list, tuple, Array)) and all(
+            [isinstance(v, (int, PrimExpr)) for v in l]
+        )
+
     def _create_shape(shape: List[Union[int, PrimExpr]]) -> ShapeExpr:
         shape_array = []
         for x in shape:
@@ -77,32 +89,60 @@ def call_tir(
                 raise TypeError("Expect int or PrimExpr for shape")
         return ShapeExpr(shape_array)
 
-    if isinstance(shape, (list, tuple, Array)):
-        if all([not isinstance(x, (list, tuple, Array, ShapeExpr)) for x in shape]):
-            shape = _create_shape(shape)  # type: ignore
-        elif all([isinstance(x, (list, tuple, Array, ShapeExpr)) for x in shape]):
-            shape = Tuple(
-                [
-                    _create_shape(x) if not isinstance(x, ShapeExpr) else x  # type: ignore
-                    for x in shape
-                ]
-            )
-        else:
-            raise TypeError(
-                f"The shape is expected to be ShapeExpr or Tuple[ShapeExpr], bot got: f{shape}"
-            )
+    def _convert_to_shape_expr(shape: Expr) -> ShapeExpr:
+        shape_sinfo = shape.struct_info
+        if not isinstance(shape_sinfo, ShapeStructInfo):
+            raise TypeError("The input shape is expected to have symbolic values")
+        if shape_sinfo.values is None:
+            raise ValueError("The input shape is expected to have symbolic values")
+        if not isinstance(shape, ShapeExpr):
+            shape = ShapeExpr(shape_sinfo.values)
+        return shape
 
-    if isinstance(args, Expr):  # type: ignore
-        args = Tuple((args,))
+    if _is_list_of_pod_values(shape):
+        shape = _create_shape(shape)  # type: ignore
+    elif isinstance(shape, Expr) and not isinstance(shape, Tuple):
+        shape = _convert_to_shape_expr(shape)
+    elif isinstance(shape, (tuple, list, Array, Tuple)):
+        fields = []
+        for field in shape:
+            if _is_list_of_pod_values(field):
+                fields.append(_create_shape(field))
+            elif isinstance(field, Expr):
+                fields.append(_convert_to_shape_expr(field))
+            else:
+                raise TypeError(
+                    "The input shape is expected to be convertible to either a ShapeExpr or Tuple "
+                    f"of ShapeExprs. However, the {field} field of the input shape array cannot "
+                    "be converted to ShapeExpr."
+                )
+        shape = Tuple(fields)
+        _update_struct_info(shape, TupleStructInfo([field.struct_info for field in fields]))
+    else:
+        raise TypeError(
+            "The input shape is expected to be convertible to either a ShapeExpr or Tuple of "
+            f"ShapeExprs. However, the input {shape} is not convertible."
+        )
 
-    if isinstance(args, (list, tuple)):
-        args = Tuple(args)
-
+    # =================== Construct the output type ===================
     if isinstance(dtype, str):
+        if isinstance(shape, Tuple):
+            raise ValueError(
+                "The number of output dtype is 1, which does not match the number of output shapes "
+                + str(len(shape))
+            )
         output_type = DynTensorType(len(shape), dtype)
     elif isinstance(dtype, (list, tuple)):
+        if not isinstance(shape, Tuple):
+            raise ValueError(
+                "The number of output shape is 1, which does not match the number of output dtypes "
+                + str(len(dtype))
+            )
         if len(shape) != len(dtype):
-            raise ValueError("The number of output_shape and output_dtype of call_tir mismatch")
+            raise ValueError(
+                f"The number of output shape is {len(shape)}, which does not match the number of "
+                f"output dtypes {len(dtype)}"
+            )
         output_type = TupleType([DynTensorType(len(x), y) for x, y in zip(shape, dtype)])
     else:
         raise TypeError("Not supported dtype for call_tir: " + str(type(dtype)))

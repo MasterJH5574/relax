@@ -43,5 +43,45 @@ def test_call_tir() -> None:
     v1 = rx.call_tir(identity_tir, [v0], [54, 96], "float32")
 
 
+def test_call_tir_with_shape_var():
+    shape_var = rx.Var("shape", R.Shape((32, 32)))
+    call = rx.call_tir("extern_func", args=[], shape=shape_var, dtype="float32")
+    assert isinstance(call.args[2].struct_info, rx.struct_info.ShapeStructInfo)
+    tvm.ir.assert_structural_equal(call.args[2].values, call.args[2].struct_info.values)
+
+
+def test_call_tir_mixed_output_shape():
+    shape_var = rx.Var("shape", R.Shape((32,)))
+    call = rx.call_tir(
+        "extern_func",
+        args=[],
+        shape=[shape_var, (64,), rx.ShapeExpr((128,))],
+        dtype=["float32", "float32", "int32"],
+    )
+    assert isinstance(call.args[2].struct_info, rx.struct_info.TupleStructInfo)
+
+    shape_sinfo = call.args[2].struct_info
+    for shape_field, sinfo_field in zip(call.args[2], shape_sinfo.fields, strict=True):
+        assert isinstance(sinfo_field, rx.struct_info.ShapeStructInfo)
+        tvm.ir.assert_structural_equal(shape_field.values, sinfo_field.values)
+
+
+def test_call_tir_inconsistent_output_shape_type_1():
+    with pytest.raises(ValueError):
+        rx.call_tir("extern_func", args=[], shape=(32, 32), dtype=["float32", "float32"])
+
+
+def test_call_tir_inconsistent_output_shape_type_2():
+    with pytest.raises(ValueError):
+        rx.call_tir("extern_func", args=[], shape=[(32,), (64,)], dtype="float32")
+
+
+def test_call_tir_inconsistent_output_shape_type_3():
+    with pytest.raises(ValueError):
+        rx.call_tir(
+            "extern_func", args=[], shape=[(32,), (64,), (128,)], dtype=["float32", "float32"]
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
