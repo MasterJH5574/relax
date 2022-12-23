@@ -22,7 +22,7 @@ from typing import TypeVar as _TypeVar
 from typing import Union
 
 from tvm import relax
-from tvm.relax import DynTensorType, Expr, Function, StructInfo
+from tvm.relax import DynTensorType, Expr, Function, ShapeStructInfo, StructInfo
 from tvm.relax import Tuple as RxTuple
 from tvm.relax import Type, Var
 from tvm.runtime import ObjectGeneric
@@ -49,13 +49,18 @@ setattr(function, "dispatch_token", "relax")
 
 
 class TensorProxy(ObjectGeneric):
+    # Todo(relax-team): support taking Var without symbolic shape as parameter
     def __call__(
         self,
-        shape: Optional[List[Union[PrimExpr, str]]] = None,
+        shape: Optional[Union[Var, List[Union[PrimExpr, str]]]] = None,
         dtype: str = None,
         ndim: int = -1,
     ) -> relax.TensorStructInfo:
         # scalar tensor case
+        if isinstance(shape, Var):
+            assert isinstance(shape.struct_info, ShapeStructInfo)
+            assert shape.struct_info.values is not None
+            shape = shape.struct_info.values
         if shape is not None and len(shape) == 0:
             shape = []
         if isinstance(shape, str) and dtype is None:

@@ -412,13 +412,25 @@ class BlockBuilder(Object):
             te_out.dtype if isinstance(te_out, tvm.te.tensor.Tensor) else [x.dtype for x in outs]
         )
 
+        output_tensor_sinfo = (
+            rx.TensorStructInfo(output_shape, output_dtype)
+            if not isinstance(output_shape, Tuple)
+            else [
+                rx.TensorStructInfo(shape, dtype)
+                for shape, dtype in zip(output_shape, output_dtype)
+            ]
+        )
+
         # add arguments for extra parameters from unbound var
         if len(unbound_tir_vars) > 0:
             call = call_tir(
-                gvar, call_args, output_shape, output_dtype, tir_vars=ShapeExpr(unbound_tir_vars)
+                gvar,
+                call_args,
+                output_tensor_sinfo,
+                tir_vars=ShapeExpr(unbound_tir_vars),
             )
         else:
-            call = call_tir(gvar, call_args, output_shape, output_dtype)
+            call = call_tir(gvar, call_args, output_tensor_sinfo)
         return call
 
     def emit_te(self, func: Callable, *args: Any, **kwargs: Any) -> Var:
@@ -491,7 +503,7 @@ class BlockBuilder(Object):
                 @R.function
                 def rx_func(x: Tensor((n, m), "float32"), y: Tensor((n, m), "float32")) -> Tensor:
                     # block 0
-                    gv = relax.call_tir("te_func", (x, y), (128, 128), dtype="float32")
+                    gv = relax.call_tir("te_func", (x, y), R.Tensor((128, 128), dtype="float32"))
                     return gv
 
         Example
@@ -536,7 +548,7 @@ class BlockBuilder(Object):
                 def rx_func(x: Tensor((n,), "float32"), y: Tensor(((n + 1),), "float32"))
                     -> Tensor(None, "float32", ndim=-1):
                     # block 0
-                    gv = relax.call_tir(te_func, (y,), ((n + 1),), (n,), dtype="float32")
+                    gv = relax.call_tir(te_func, (y,), R.Tensor(((n + 1),) "float32"), (n,))
                     return gv
         """
         return self.emit(self.call_te(func, *args, **kwargs))

@@ -250,8 +250,8 @@ def test_to_non_dataflow():
         def foo(x: R.Tensor(("m", "n"), "float32")):
             m, n = T.var("int64"), T.var("int64")
             with R.dataflow():
-                lv0 = R.call_tir("test.op.identity", (x,), (m, n), dtype="float32")
-                gv0 = R.call_tir("test.op.identity", (lv0,), (m, n), dtype="float32")
+                lv0 = R.call_tir("test.op.identity", (x,), R.Tensor((m, n), dtype="float32"))
+                gv0 = R.call_tir("test.op.identity", (lv0,), R.Tensor((m, n), dtype="float32"))
                 R.output(gv0)
             return gv0
 
@@ -294,7 +294,7 @@ def test_call_tir_rewrite():
         @R.function
         def foo(x: R.Tensor(("m", "n"), "float32")):
             m, n = T.var("int64"), T.var("int64")
-            gv0 = R.call_tir("test.op.identity", (x,), (m, n), dtype="float32")
+            gv0 = R.call_tir("test.op.identity", (x,), R.Tensor((m, n), dtype="float32"))
             return gv0
 
     mod = TestCallTIRRewrite
@@ -398,7 +398,7 @@ def test_vm_static_shape_lowering():
         @R.function
         def foo(x: R.Tensor((2, 3), "float32")):
             with R.dataflow():
-                y = R.call_tir("test.vm.tile", (x), (2, 6), dtype="float32")
+                y = R.call_tir("test.vm.tile", (x), R.Tensor((2, 6), dtype="float32"))
                 R.output(y)
             return y
 
@@ -435,7 +435,7 @@ def test_vm_shape_lowering_func_param_with_shape():
         @R.function
         def foo(x: R.Tensor(("m", "n"), "float32"), w: R.Tensor(("n", "k"), "float32")):
             m, k = T.var("int64"), T.var("int64")
-            gv0 = R.call_tir(tir_matmul, (x, w), (m, k), dtype="float32")
+            gv0 = R.call_tir(tir_matmul, (x, w), R.Tensor((m, k), dtype="float32"))
             return gv0
 
     mod = InputModule

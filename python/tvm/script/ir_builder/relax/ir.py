@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import tvm
 from tvm.ir import Type
-from tvm.relax import Call, Expr, ExternFunc, TupleGetItem, TupleType, Var, const
+from tvm.relax import Call, Expr, ExternFunc, ShapeExpr, TupleGetItem, TupleType, Var, const
 from tvm.relax.struct_info import StructInfo, TensorStructInfo
 from tvm.relax.analysis import get_static_type
 
@@ -395,6 +395,7 @@ __all__ = [
     "If",
     "Object",
     "RewriteSymbolicShape",
+    "ShapeExpr",
     "Then",
     "TupleGetItem",
     "Void",

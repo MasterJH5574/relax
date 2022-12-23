@@ -38,9 +38,46 @@ def identity_tir(a: T.handle, b: T.handle) -> None:
 
 
 def test_call_tir() -> None:
-    v0 = rx.Var("v0", R.Tensor([54, 96], "float32"))
-    v1 = rx.call_tir(rx.extern("test.op.identity"), [v0], [54, 96], "float32")
-    v1 = rx.call_tir(identity_tir, [v0], [54, 96], "float32")
+    v0 = rx.Var("v0", R.Tensor((54, 96), "float32"))
+    v1 = rx.call_tir(rx.extern("test.op.identity"), [v0], R.Tensor((54, 96), "float32"))
+    v1 = rx.call_tir(identity_tir, [v0], R.Tensor((54, 96), "float32"))
+
+
+def test_call_tir_with_shape_var():
+    shape_var = rx.Var("shape", R.Shape((32, 32)))
+    call = rx.call_tir("extern_func", args=[], output_tensor_sinfo=R.Tensor(shape_var, "float32"))
+    assert isinstance(call.args[2].struct_info, rx.struct_info.ShapeStructInfo)
+    tvm.ir.assert_structural_equal(call.args[2].values, call.args[2].struct_info.values)
+
+
+def test_call_tir_invalid_output_shape_1():
+    with pytest.raises(ValueError):
+        rx.call_tir("extern_func", args=[], output_tensor_sinfo=R.Tensor(ndim=2, dtype="float32"))
+
+
+def test_call_tir_invalid_output_shape_2():
+    with pytest.raises(TypeError):
+        rx.call_tir("extern_func", args=[], output_tensor_sinfo=R.Shape((32, 32)))
+
+
+def test_call_tir_invalid_output_dtype():
+    with pytest.raises(ValueError):
+        rx.call_tir("extern_func", args=[], output_tensor_sinfo=R.Tensor((32, 32)))
+
+
+def test_call_tir_mixed_output_shape():
+    shape_var = rx.Var("shape", R.Shape((32,)))
+    call = rx.call_tir(
+        "extern_func",
+        args=[],
+        output_tensor_sinfo=[R.Tensor(shape_var, "float32"), R.Tensor((64,), "int32")],
+    )
+    assert isinstance(call.args[2].struct_info, rx.struct_info.TupleStructInfo)
+
+    shape_sinfo = call.args[2].struct_info
+    for shape_field, sinfo_field in zip(call.args[2], shape_sinfo.fields, strict=True):
+        assert isinstance(sinfo_field, rx.struct_info.ShapeStructInfo)
+        tvm.ir.assert_structural_equal(shape_field.values, sinfo_field.values)
 
 
 if __name__ == "__main__":

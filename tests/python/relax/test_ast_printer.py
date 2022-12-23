@@ -377,7 +377,7 @@ def test_call_tir():
     @R.function
     def foo(x: R.Tensor(("m", "n"), "float32")):
         m, n = T.var("int64"), T.var("int64")
-        gv0 = R.call_tir("test.op.identity", (x,), (m, n), dtype="float32")
+        gv0 = R.call_tir("test.op.identity", (x,), R.Tensor((m, n), dtype="float32"))
         return gv0
 
     foo_str = strip_whitespace(

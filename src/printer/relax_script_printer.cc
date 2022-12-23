@@ -91,29 +91,55 @@ Doc RelaxScriptPrinter::VisitNode_(const relax::CallNode* op) {
   if (op->op == call_tir_op) {
     doc << "R.call_tir";
 
-    for (const Expr& arg : op->args) {
-      args.push_back(Print(arg));
-    }
-    doc << "(" << Doc::Concat(args, Doc::Text(", "));
+    args.push_back(Print(op->args[0]));
+    args.push_back(Print(op->args[1]));
 
-    Type output_type = op->type_args[0];
-    if (const auto* out_type = output_type.as<DynTensorTypeNode>()) {
-      doc << ", dtype=" << PrintDType(out_type->dtype) << ")";
-    } else if (const auto* out_type = output_type.as<TupleTypeNode>()) {
-      std::vector<Doc> dtypes;
-      for (auto field : out_type->fields) {
-        if (const auto* field_type = field.as<DynTensorTypeNode>()) {
-          Doc dtype;
-          dtype << PrintDType(field_type->dtype);
-          dtypes.push_back(dtype);
-        } else {
-          LOG(FATAL) << "TypeError: Invalid type: " << field_type->GetTypeKey();
-        }
+    if (const auto* shape_tuple = op->args[2].as<TupleNode>()) {
+      const auto* ttype_tuple = op->type_args[0].as<TupleTypeNode>();
+      ICHECK(ttype_tuple != nullptr)
+          << "The output dtype should be a tuple when the output shape is a tuple";
+      ICHECK_EQ(shape_tuple->fields.size(), ttype_tuple->fields.size());
+      int n_output = shape_tuple->fields.size();
+
+      Array<TensorStructInfo> tensor_info;
+      tensor_info.reserve(n_output);
+      for (int i = 0; i < n_output; ++i) {
+        tensor_info.push_back(TensorStructInfo(
+            shape_tuple->fields[i], Downcast<DynTensorType>(ttype_tuple->fields[i])->dtype));
       }
-      doc << ", dtype=(" << Doc::Concat(dtypes, Doc::Text(", ")) << "))";
+      args.push_back(Print(tensor_info));
     } else {
-      LOG(FATAL) << "TypeError: Invalid type: " << output_type->GetTypeKey();
+      args.push_back(
+          Print(TensorStructInfo(op->args[2], Downcast<DynTensorType>(op->type_args[0])->dtype)));
     }
+
+    if (op->args.size() == 4) {
+      args.push_back(Print(op->args[3]));
+    }
+
+    // for (const Expr& arg : op->args) {
+    //   args.push_back(Print(arg));
+    // }
+    doc << "(" << Doc::Concat(args, Doc::Text(", ")) << ")";
+
+    // Type output_type = op->type_args[0];
+    // if (const auto* out_type = output_type.as<DynTensorTypeNode>()) {
+    //   doc << ", dtype=" << PrintDType(out_type->dtype) << ")";
+    // } else if (const auto* out_type = output_type.as<TupleTypeNode>()) {
+    //   std::vector<Doc> dtypes;
+    //   for (auto field : out_type->fields) {
+    //     if (const auto* field_type = field.as<DynTensorTypeNode>()) {
+    //       Doc dtype;
+    //       dtype << PrintDType(field_type->dtype);
+    //       dtypes.push_back(dtype);
+    //     } else {
+    //       LOG(FATAL) << "TypeError: Invalid type: " << field_type->GetTypeKey();
+    //     }
+    //   }
+    //   doc << ", dtype=(" << Doc::Concat(dtypes, Doc::Text(", ")) << "))";
+    // } else {
+    //   LOG(FATAL) << "TypeError: Invalid type: " << output_type->GetTypeKey();
+    // }
     return doc;
   }
 

@@ -21,9 +21,10 @@ import tvm
 from tvm.runtime.object import Object
 
 from . import _ffi_api
-from ..expr import Expr, ShapeExpr, Tuple, Call, ExternFunc
+from ..expr import Expr, ShapeExpr, Tuple, Call, ExternFunc, _update_struct_info
+from ..struct_info import ShapeStructInfo, TupleStructInfo, TensorStructInfo
 from ..ty import DynTensorType, TupleType
-from ...ir import Array, Type, PrimExpr
+from ...ir import Array, Type
 
 py_print = print  # pylint: disable=invalid-name
 
@@ -31,8 +32,7 @@ py_print = print  # pylint: disable=invalid-name
 def call_tir(
     func: Union[str, Expr],
     args: Union[Expr, Tuple, List[Expr]],
-    shape: Union[Tuple, ShapeExpr, List[int]],
-    dtype: Union[str, List[str]],
+    output_tensor_sinfo: Union[TensorStructInfo, List[TensorStructInfo]],
     tir_vars: Optional[ShapeExpr] = None,
 ) -> Call:
     """
@@ -46,11 +46,10 @@ def call_tir(
     args : Union[Expr, Tuple, List[Expr]]
         The input arguments.
 
-    shape: Union[Tuple, ShapeExpr, List[int]]
-        The output shape. Tuple(ShapeExpr) if multiple outputs, ShapeExpr if single output.
-
-    dtype: Union[str, List[str]]
-        The output dtype. List[str] if multiple outputs, str if single output.
+    output_tensor_sinfo : Union[StructInfo, List[StructInfo]]
+        The structure info of the output. Can be either a TensorStructInfo
+        or a TupleStructInfo whose fields are all TensorStructInfo.
+        Moreover, all the TensorStructInfo inside must have symbolic shape defined.
 
     tir_vars : ShapeExpr, optional
         ShapeExpr representing a tuple of integers to unpack when calling func. Is null if not used
@@ -63,51 +62,42 @@ def call_tir(
     if isinstance(func, str):
         func = ExternFunc(func)
 
-    def _create_shape(shape: List[Union[int, PrimExpr]]) -> ShapeExpr:
-        shape_array = []
-        for x in shape:
-            if isinstance(x, int):
-                shape_array.append(tvm.tir.IntImm("int64", x))
-            elif isinstance(x, PrimExpr):
-                # TODO: enforce all shapes are i64
-                # if x.dtype != "int64":
-                #     raise TypeError("Expect int64 dtype for shape")
-                shape_array.append(x)
-            else:
-                raise TypeError("Expect int or PrimExpr for shape")
-        return ShapeExpr(shape_array)
-
-    if isinstance(shape, (list, tuple, Array)):
-        if all([not isinstance(x, (list, tuple, Array, ShapeExpr)) for x in shape]):
-            shape = _create_shape(shape)  # type: ignore
-        elif all([isinstance(x, (list, tuple, Array, ShapeExpr)) for x in shape]):
-            shape = Tuple(
-                [
-                    _create_shape(x) if not isinstance(x, ShapeExpr) else x  # type: ignore
-                    for x in shape
-                ]
-            )
-        else:
-            raise TypeError(
-                f"The shape is expected to be ShapeExpr or Tuple[ShapeExpr], bot got: f{shape}"
-            )
-
-    if isinstance(args, Expr):  # type: ignore
+    if isinstance(args, Expr):
         args = Tuple((args,))
-
-    if isinstance(args, (list, tuple)):
+    elif isinstance(args, (list, tuple)):
         args = Tuple(args)
 
-    if isinstance(dtype, str):
-        output_type = DynTensorType(len(shape), dtype)
-    elif isinstance(dtype, (list, tuple)):
-        if len(shape) != len(dtype):
-            raise ValueError("The number of output_shape and output_dtype of call_tir mismatch")
-        output_type = TupleType([DynTensorType(len(x), y) for x, y in zip(shape, dtype)])
-    else:
-        raise TypeError("Not supported dtype for call_tir: " + str(type(dtype)))
+    def _convert_shape_type(tensor_sinfo: TensorStructInfo):
+        if not isinstance(tensor_sinfo, TensorStructInfo):
+            raise TypeError(
+                "The output struct info is only allowed to be TensorStructInfo. However, one "
+                f"given struct info is {tensor_sinfo}"
+            )
+        if tensor_sinfo.dtype == "":
+            raise ValueError("The output tensor should have known dtype")
 
-    return _ffi_api.call_tir(func, args, shape, output_type, tir_vars)  # type: ignore
+        shape = tensor_sinfo.shape
+        if shape is None:
+            raise ValueError("The output tensor should have defined symbolic shape")
+        shape_sinfo = shape.struct_info
+        assert isinstance(shape_sinfo, ShapeStructInfo)
+        if shape_sinfo.values is None:
+            raise ValueError("The output tensor should have defined symbolic shape")
+
+        ttype = DynTensorType(len(shape_sinfo.values), tensor_sinfo.dtype)
+        return shape, ttype
+
+    if isinstance(output_tensor_sinfo, (list, tuple, Array)):
+        shapes, ttypes = zip(
+            *[_convert_shape_type(tensor_sinfo) for tensor_sinfo in output_tensor_sinfo]
+        )
+        shapes = Tuple(shapes)
+        _update_struct_info(shapes, TupleStructInfo([shape.struct_info for shape in shapes]))
+        ttypes = TupleType(ttypes)
+        return _ffi_api.call_tir(func, args, shapes, ttypes, tir_vars)  # type: ignore
+    else:
+        shape, ttype = _convert_shape_type(output_tensor_sinfo)
+        return _ffi_api.call_tir(func, args, shape, ttype, tir_vars)  # type: ignore
 
 
 def make_closure(

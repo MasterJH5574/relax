@@ -181,12 +181,12 @@ def test_block_builder_input_mod():
             x: R.Tensor(("m", "n"), "float32"), w: R.Tensor(("n", "k"), "float32")
         ) -> R.Tensor:
             m, n, k = T.var("int64"), T.var("int64"), T.var("int64")
-            gv0 = R.call_tir("tir_matmul", (x, w), (m, k), dtype="float32")
+            gv0 = R.call_tir("tir_matmul", (x, w), R.Tensor((m, k), dtype="float32"))
             return gv0
 
     @R.function
     def after_main(x: R.Tensor((32, 32), "float32"), w: R.Tensor((32, 32), "float32")) -> R.Tensor:
-        gv0 = R.call_tir("tir_matmul", (x, w), (32, 32), dtype="float32")
+        gv0 = R.call_tir("tir_matmul", (x, w), R.Tensor((32, 32), dtype="float32"))
         return gv0
 
     input_mod = InputModule

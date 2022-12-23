@@ -176,7 +176,7 @@ def test_unexpected_tir_cast_args():
         @R.function
         def f(x: R.Tensor(("m",), "float32")):
             m = T.var("int64")
-            return R.call_tir("foo", (x,), (T.cast("int32", m, 1),), dtype="float32")
+            return R.call_tir("foo", (x,), R.Tensor((T.cast("int32", m, 1),), dtype="float32"))
 
 
 def test_unexpected_tir_max_args():
@@ -186,7 +186,7 @@ def test_unexpected_tir_max_args():
         @R.function
         def f(x: R.Tensor(("m", "n"), "float32")):
             m = T.var("int64")
-            return relax.call_tir("foo", (x,), (T.max(m),), dtype="float32")
+            return relax.call_tir("foo", (x,), R.Tensor((T.max(m),), dtype="float32"))
 
 
 def test_match_shape():
@@ -494,7 +494,7 @@ def test_call_tir():
     @R.function
     def foo(x: R.Tensor(("m", "n"), "float32")):
         m, n = T.var("int64"), T.var("int64")
-        gv0 = relax.call_tir("test.op.identity", (x,), (m, n), dtype="float32")
+        gv0 = relax.call_tir("test.op.identity", (x,), R.Tensor((m, n), dtype="float32"))
         return gv0
 
     call_tir_node = foo.body.blocks[0].bindings[0].value
@@ -521,7 +521,7 @@ def test_inline_tir():
                     C[vi, vj] += A[vi, vk] * B[vj, vk]
 
         B = T.var("int64")
-        z = R.call_tir(my_matmul, (x, y), (B, 128), dtype="float32")
+        z = R.call_tir(my_matmul, (x, y), R.Tensor((B, 128), dtype="float32"))
         return z
 
     x, y = f.params
@@ -666,7 +666,7 @@ def test_primexpr_arithmetic():
 def test_call_tir_extern():
     @R.function
     def f(x: R.Tensor) -> R.Tensor:
-        z = R.call_tir("my_extern", (x,), (10,), dtype="float32")
+        z = R.call_tir("my_extern", (x,), R.Tensor((10,), dtype="float32"))
         return z
 
     x = f.params[0]
@@ -695,7 +695,7 @@ def test_empty_shape():
             with T.block("add"):
                 C[()] = A[()] + B[()]
 
-        z = relax.call_tir(scalar_add, (x, y), (), dtype="float32")
+        z = relax.call_tir(scalar_add, (x, y), R.Tensor((), dtype="float32"))
         return z
 
     x, y = f.params
@@ -734,13 +734,13 @@ def test_class_irmodule():
         @R.function
         def g(y: R.Tensor(("n", "n"))) -> R.Tensor:
             n = T.var("int64")
-            return R.call_tir(my_matmul, (y, y), (n, n), dtype="float32")
+            return R.call_tir(my_matmul, (y, y), R.Tensor((n, n), dtype="float32"))
 
         @R.function
         def j(y: R.Tensor(("n", "n"))) -> R.Tensor:
             n = T.var("int64")
             with R.dataflow():
-                gv = R.call_tir(my_matmul, (y, y), (n, n), dtype="float32")
+                gv = R.call_tir(my_matmul, (y, y), R.Tensor((n, n), dtype="float32"))
                 gv1 = (gv, gv)
                 gv2 = gv1[1]
                 R.output(gv2)
@@ -861,7 +861,7 @@ def test_function_attrs():
         ) -> R.Tensor:
             R.func_attr({"global_symbol": "main"})
             m, n, k = T.var("int64"), T.var("int64"), T.var("int64")
-            gv0 = R.call_tir("tir_matmul", (x, w), (m, k), dtype="float32")
+            gv0 = R.call_tir("tir_matmul", (x, w), R.Tensor((m, k), dtype="float32"))
             return gv0
 
     assert InputModule["main"].attrs["global_symbol"] == "main"
