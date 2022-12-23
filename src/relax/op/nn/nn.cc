@@ -667,7 +667,6 @@ Expr InferShapeCrossEntropy(const Call& call, DiagnosticContext diag_ctx) {
     return ShapeExpr(Array<PrimExpr>{});
   } else {
     return RuntimeDepShape();
-    ;
   }
 }
 
