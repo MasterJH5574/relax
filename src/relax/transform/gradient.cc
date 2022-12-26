@@ -34,14 +34,15 @@
 namespace tvm {
 namespace relax {
 
-class GradientMutator : public ExprMutator {
+/*!
+ * Step 1. Copy a function
+ *
+ */
+class FunctionWithNewParamCopier : public ExprMutator {
+  //
  public:
-  explicit GradientMutator(IRModule mod, const Array<Var>& require_grads)
-      : ExprMutator(std::move(mod)), require_grads_(std::move(require_grads)) {}
-
-  Function FuncTransform(Function func) {
-    // TODO(chaofan, yixin): handling the case where the body is not SeqExpr.
-    CHECK(func->body->IsInstance<SeqExprNode>());
+  static Function Copy(Function func) {
+    //
 
     // copy the params of original function using VisitWithNewScope
     Array<Var> new_params;
@@ -51,37 +52,78 @@ class GradientMutator : public ExprMutator {
       new_params.push_back(new_param);
     }
     Expr new_body = VisitWithNewScope(func->body);
+  }
+};
 
-    const auto* seq_expr = new_body.as<SeqExprNode>();
-    // only support a single dataflow block.
-    // TODO(chaofan, yixin): multiple blocks AD
-    CHECK(seq_expr->blocks.size() == 1);
-    // TODO(chaofan, yixin): AD in non-dataflow block.
-    CHECK(seq_expr->blocks[0]->IsInstance<DataflowBlockNode>());
-    const auto* block = seq_expr->blocks[0].as<DataflowBlockNode>();
+class GradientMutator : public ExprMutator {
+ public:
+  explicit GradientMutator(IRModule mod, const Array<Var>& require_grads)
+      : ExprMutator(std::move(mod)), require_grads_(std::move(require_grads)) {}
 
-    builder_->BeginDataflowBlock();
-    // copy bindings in the original block using VisitBinding
-    for (const auto& binding : block->bindings) {
-      VisitBinding(binding);
-    }
+  /*!
+   *
+   * Step 2. Create adjoint variables for params
+   * Step 3. Recursive visit
+   * Step 4. Epilogue
+   *
+   */
 
+  Function FuncTransform(Function func) {
+    // Note: consider integrate it into the epilogue
     // create adjoint var for inputs
     for (size_t i = 0; i < new_params.size(); ++i) {
       if (std::find(require_grads_.begin(), require_grads_.end(), func->params[i]) !=
           require_grads_.end()) {
-        CreateAdjointVar(new_params[i], /*is_datalfow_var=*/false);
+        CreateAdjointVar(new_params[i], /*is_dataflow_var=*/false);
       } else {
-        CreateAdjointVar(new_params[i], /*is_datalfow_var=*/true);
+        CreateAdjointVar(new_params[i], /*is_dataflow_var=*/true);
       }
     }
 
+    // TODO(chaofan, yixin): handling the case where the body is not SeqExpr.
+    CHECK(func->body->IsInstance<SeqExprNode>());
+    const auto* seq_expr = func.as<SeqExprNode>();
+    // only support a single dataflow block.
+    // TODO(chaofan, yixin): multiple blocks AD
+
+    // TODO(chaofan, yixin): AD in non-dataflow block.
+    CHECK(seq_expr->blocks[0]->IsInstance<DataflowBlockNode>());
+    const auto* block = seq_expr->blocks[0].as<DataflowBlockNode>();
+
     // check whether the target(the return value of the function) is valid
-    const auto* node = seq_expr->body.as<VarNode>();
-    CHECK(node != nullptr) << "the body of the function is not a relax.Var";
-    const Var& target = GetRef<Var>(node);
+    const auto* body_var = seq_expr->body.as<VarNode>();
+    CHECK(body_var != nullptr) << "the body of the function is not a relax.Var";
+    const Var& target = GetRef<Var>(body_var);
     CheckTarget(target);
     target_var_ = target;
+
+    VisitExpr_(seq_expr);
+
+    out_expr.push_back(Tuple(out_adjoints));
+    out_shape.push_back(Tuple(out_adjoints_shape));
+    ret_type.push_back(TupleType(out_adjoints_type));
+
+    Type new_ret_type = VisitType(TupleType(ret_type));
+    Expr final_body = builder_->Normalize(SeqExpr({builder_->EndBlock()}, Tuple(out_expr)));
+
+    return Function(new_params, final_body, new_ret_type, /*Tuple(out_shape)*/ RuntimeDepShape(),
+                    func->attrs);
+  }
+
+ private:
+  Expr VisitExpr_(const SeqExprNode* seq) final {
+    CHECK(seq->blocks.size() == 1);
+    // ensure it is a dataflow block
+    ///
+    DataflowBlock block = VisitBindingBlock_(Downcast<DataflowBlock>(seq->blocks[0]));
+    // ...
+  }
+
+  BindingBlock VisitBindingBlock_(const DataflowBlockNode* block) final {
+    builder_->BeginDataflowBlock();
+    for (auto binding : block->bindings) {
+      this->VisitBinding(binding);
+    }
 
     // reverse-mode ad
     for (int i = static_cast<int>(block->bindings.size()) - 1; i >= 0; --i) {
@@ -100,8 +142,8 @@ class GradientMutator : public ExprMutator {
     // emit the input adjoints
     static const Op& default_op = Op::Get("relax.zeros");
     for (size_t i = 0; i < new_params.size(); ++i) {
-      if (require_grads_.empty() || std::find(require_grads_.begin(), require_grads_.end(),
-                                              func->params[i]) != require_grads_.end()) {
+      if (std::find(require_grads_.begin(), require_grads_.end(), func->params[i]) !=
+          require_grads_.end()) {
         const Var& adjoint_var = adjoint_var_map_[new_params[i]];
         if (adjoint_expr_map_.count(new_params[i])) {
           BindAndEmit(adjoint_var, adjoint_expr_map_[new_params[i]]);
@@ -119,22 +161,14 @@ class GradientMutator : public ExprMutator {
       }
     }
 
-    out_expr.push_back(Tuple(out_adjoints));
-    out_shape.push_back(Tuple(out_adjoints_shape));
-    ret_type.push_back(TupleType(out_adjoints_type));
-
-    Type new_ret_type = VisitType(TupleType(ret_type));
-    Expr final_body = builder_->Normalize(SeqExpr({builder_->EndBlock()}, Tuple(out_expr)));
-
-    return Function(new_params, final_body, new_ret_type, /*Tuple(out_shape)*/ RuntimeDepShape(),
-                    func->attrs);
+    return builder_->EndBlock();
   }
 
   void ReverseVisit(const VarBindingNode* binding) {
     static const OpAttrMap<FPrimalGradient>& gradient_op_map =
         Op::GetAttrMap<FPrimalGradient>("FPrimalGradient");
 
-    CreateAdjointVar(binding->var, /*is_datalfow_var=*/true);
+    CreateAdjointVar(binding->var, /*is_dataflow_var=*/true);
     const Var& adjoint_var = adjoint_var_map_[binding->var];
 
     // must be ignored output's AST
@@ -182,8 +216,26 @@ class GradientMutator : public ExprMutator {
     }
   }
 
- private:
+  // Step 1. Inline discussion in `ReverseVisit`
+  // Step 2. Try to utilize nested_msg to inline `UpdateExprMap`
+  void VisitBinding_(const VarBindingNode* binding, const TupleNode* val) final {
+    //
+  }
+
+  void VisitBinding_(const VarBindingNode* binding, const VarNode* val) final {
+    //
+  }
+
+  void VisitBinding_(const VarBindingNode* binding, const CallNode* val) final {
+    //
+  }
+
+  void VisitBinding_(const VarBindingNode* binding, const TupleGetItemNode* val) final {
+    //
+  }
+
   Expr ReplaceExprByVar(Expr expr) {
+    // return adjoint_expr_to_var_.Get(expr).value_or(expr);
     if (adjoint_expr_to_var_.count(expr)) {
       return adjoint_expr_to_var_[expr];
     }
@@ -214,6 +266,7 @@ class GradientMutator : public ExprMutator {
         adjoint_expr_map_.Set(v, updated);
       }
     } else if (const auto* node = base.as<TupleNode>()) {
+      /*! \sa nested_msg.h */
       if (const auto* node1 = increment.as<TupleNode>()) {
         for (size_t i = 0; i < node->fields.size(); ++i) {
           UpdateExprMap(node->fields[i], node1->fields[i]);
@@ -266,6 +319,7 @@ class GradientMutator : public ExprMutator {
     return Tuple(ret);
   }
 
+  // UpdateAdjointValue
   Expr DoAdd(const Expr& src1, const Expr& src2) {
     static const Op& add_op = Op::Get("relax.add");
 
@@ -325,6 +379,7 @@ class GradientMutator : public ExprMutator {
     CHECK(shape_node->values.size() == 0) << "target must be a scalar";
   }
 
+  // Expose the make functions in make_op.h
   void InitGrad(const Var& adjoint_var, const Var& var) {
     static const Op& ones_op = Op::Get("relax.ones");
 
@@ -346,25 +401,22 @@ class GradientMutator : public ExprMutator {
   // var to its adjoint expr
   Map<Var, Expr> adjoint_expr_map_;
   // trace binding
+  // binding value -> binding var
   Map<Expr, Var> adjoint_expr_to_var_;
   // track zeros introduced
   std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> zeros_tracker_;
 };
 
 /* This is the internal function of tvm::relax::transform::Gradient. */
-IRModule Gradient(IRModule m, const GlobalVar& gvar,
-                  Optional<Array<Var>> require_grads = runtime::NullOptType()) {
+IRModule Gradient(IRModule m, const GlobalVar& gvar, Optional<Array<Var>> require_grads) {
   auto* func = m->Lookup(gvar).as<FunctionNode>();
 
-  if (func == nullptr) {
-    LOG(FATAL) << "relax function " << gvar->name_hint << " not found";
-    return m;
-  }
+  CHECK(func != nullptr) << "relax function " << gvar->name_hint << " not found";
 
   auto f_before = GetRef<Function>(func);
   if (require_grads.defined()) {
     for (auto input : require_grads.value()) {
-      ICHECK(std::find(func->params.begin(), func->params.end(), input) != func->params.end())
+      CHECK(std::find(func->params.begin(), func->params.end(), input) != func->params.end())
           << "function " << gvar->name_hint << " has no var named " << input->name_hint();
     }
   } else {
@@ -376,9 +428,9 @@ IRModule Gradient(IRModule m, const GlobalVar& gvar,
   auto new_module = GetRef<IRModule>(new_module_node);
   auto mutator = GradientMutator(new_module, require_grads.value());
 
-  auto adjoint_var = GlobalVar(gvar->name_hint + "_adjoint");
+  auto adjoint_gvar = GlobalVar(gvar->name_hint + "_adjoint");
   Function f_after = mutator.FuncTransform(GetRef<Function>(func));
-  new_module->Add(adjoint_var, f_after);
+  new_module->Add(adjoint_gvar, f_after);
 
   return new_module;
 }
