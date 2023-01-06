@@ -186,6 +186,9 @@ StructInfo InferStructInfoPermuteDims(const Call& call, const BlockBuilder& ctx)
   const auto* attrs = call->attrs.as<PermuteDimsAttrs>();
   if (data_sinfo->IsUnknownNdim()) {
     if (attrs->axes.defined()) {
+      // Todo(relax-team): At this moment, enforcing MatchCast is fine. But we need to remove this
+      // requirement and instead trust the input axes, with a runtime check emitted before
+      // this call, so that we reduce the workload of importers for dynamic shape cases.
       ctx->ReportFatal(Diagnostic::Error(call)
                        << "PermuteDims cannot be performed when the input tensor " << data_sinfo
                        << " ndim is unknown while the given number of axes " << attrs->axes.value()
@@ -337,6 +340,9 @@ StructInfo InferStructInfoSqueeze(const Call& call, const BlockBuilder& ctx) {
       if (int_len == nullptr || int_len->value != 1) {
         // We would like to ensure safety, and therefore placed a stronger requirement for user to
         // use MatchCast.
+        // Todo(relax-team): At this moment, enforcing MatchCast is fine. But we need to remove this
+        // requirement and instead trust the input axis, with a runtime check emitted before
+        // this call, so that we reduce the workload of importers for dynamic shape cases.
         ctx->ReportFatal(Diagnostic::Error(call)
                          << "Squeeze expects the input tensor shape values at the given axis "
                             "positions to be all 1. However, the tensor shape at axis "
@@ -535,6 +541,9 @@ StructInfo InferStructInfoConcat(const Call& call, const BlockBuilder& ctx) {
     if (!attrs->axis.defined() && sinfo->ndim != 1) {
       // To ensure safety, we require all tensors to explicitly have ndim 1 when the concat axis
       // is not specified.
+      // Todo(relax-team): At this moment, enforcing MatchCast is fine. But we need to remove this
+      // requirement and instead trust the input tensor, with a runtime check emitted before
+      // this call, so that we reduce the workload of importers for dynamic shape cases.
       ctx->ReportFatal(
           Diagnostic::Error(call)
           << "Concat expects all input tensors to be flattened 1-dimensional tensor when the axis "
@@ -770,6 +779,9 @@ StructInfo InferStructInfoBroadcastTo(const Call& call, const BlockBuilder& ctx)
     } else if (!analyzer->CanProveEqual(old_len, tgt_len)) {
       // We would like to ensure safety, and therefore placed a stronger requirement for user to
       // use MatchCast.
+      // Todo(relax-team): At this moment, enforcing MatchCast is fine. But we need to remove this
+      // requirement and instead trust the input target shape, with a runtime check emitted before
+      // this call, so that we reduce the workload of importers for dynamic shape cases.
       ctx->ReportFatal(
           Diagnostic::Error(call)
           << "broadcast_to expects the input tensor shape is broadcastable to the target shape. "
