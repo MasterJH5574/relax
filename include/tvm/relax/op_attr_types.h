@@ -70,6 +70,15 @@ struct AssertOpAttrs : public tvm::AttrsNode<AssertOpAttrs> {
   }
 };
 
+/*! \brief Attributes used in cumsum operator */
+struct CumsumAttrs : public tvm::AttrsNode<CumsumAttrs> {
+  Optional<Integer> axis;
+
+  TVM_DECLARE_ATTRS(CumsumAttrs, "relax.attrs.CumsumAttrs") {
+    TVM_ATTR_FIELD(axis).set_default(Optional<Integer>{NullOpt});
+  }
+};  // struct CumsumAttrs
+
 }  // namespace relax
 }  // namespace tvm
 #endif  // TVM_RELAX_OP_ATTR_TYPES_H_

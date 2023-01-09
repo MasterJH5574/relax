@@ -665,5 +665,4 @@ if __name__ == "__main__":
     test_zero_dim_add()
     test_loop_var_datatype()
     test_unbound_var()
-    test_argmax()
     test_reshape()
