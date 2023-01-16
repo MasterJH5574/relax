@@ -41,6 +41,30 @@ TEFunc = Callable[..., te.Tensor]
 LegalizeFunc = Callable[[BlockBuilder, Call], Expr]
 
 
+# The default legalization map. Items will be registered by `register_default_legalize_func`.
+DEFAULT_OP_LEGALIZE_MAP: Dict[str, LegalizeFunc] = dict()
+
+
+def register_default_legalize_func(op_name: str, legalize_func: LegalizeFunc = None):
+    """The util function for registering a legalization function into the default
+    legalization map.
+
+    Parameters
+    ----------
+    op_name : str
+        The name of the op whose legalization function is to be registered.
+
+    legalize_func : LegalizeFunc
+        The default legalization function to be registered for the given op.
+    """
+
+    def register_default_map(func):
+        DEFAULT_OP_LEGALIZE_MAP[op_name] = func
+        return func
+
+    return register_default_map if legalize_func is None else register_default_map(legalize_func)
+
+
 def has_known_shape_value(sinfo: struct_info.StructInfo) -> bool:
     """Check if a given Tensor/Shape/TupleStructInfo contains
     shapes whose values are all known.
@@ -109,6 +133,33 @@ def _binary(te_func: TEFunc) -> LegalizeFunc:
     return binary_call_te
 
 
+##################### Unary arithmetic #####################
+
+
+register_default_legalize_func("relax.cos", _unary(topi.cos))
+register_default_legalize_func("relax.log", _unary(topi.log))
+register_default_legalize_func("relax.negative", _unary(topi.negative))
+register_default_legalize_func("relax.sigmoid", _unary(topi.sigmoid))
+register_default_legalize_func("relax.sin", _unary(topi.sin))
+register_default_legalize_func("relax.sqrt", _unary(topi.sqrt))
+register_default_legalize_func("relax.tanh", _unary(topi.tanh))
+
+
+##################### Binary arithmetic and comparison #####################
+
+register_default_legalize_func("relax.add", _binary(topi.add))
+register_default_legalize_func("relax.divide", _binary(topi.divide))
+register_default_legalize_func("relax.floor_divide", _binary(topi.floor_divide))
+register_default_legalize_func("relax.multiply", _binary(topi.multiply))
+register_default_legalize_func("relax.subtract", _binary(topi.subtract))
+register_default_legalize_func("relax.equal", _binary(topi.equal))
+register_default_legalize_func("relax.greater", _binary(topi.greater))
+register_default_legalize_func("relax.greater_equal", _binary(topi.greater_equal))
+register_default_legalize_func("relax.less", _binary(topi.less))
+register_default_legalize_func("relax.less_equal", _binary(topi.less_equal))
+register_default_legalize_func("relax.not_equal", _binary(topi.not_equal))
+
+
 ##################### Creation #####################
 
 
@@ -129,6 +180,26 @@ def _full(is_like: bool, fill_value: Optional[float], primfunc_name: str) -> Leg
     return full_call_te
 
 
+register_default_legalize_func(
+    "relax.full", _full(is_like=False, fill_value=None, primfunc_name="full")
+)
+register_default_legalize_func(
+    "relax.full_like", _full(is_like=True, fill_value=None, primfunc_name="full")
+)
+register_default_legalize_func(
+    "relax.ones", _full(is_like=False, fill_value=1.0, primfunc_name="ones")
+)
+register_default_legalize_func(
+    "relax.ones_like", _full(is_like=True, fill_value=1.0, primfunc_name="ones")
+)
+register_default_legalize_func(
+    "relax.zeros", _full(is_like=False, fill_value=0.0, primfunc_name="zeros")
+)
+register_default_legalize_func(
+    "relax.zeros_like", _full(is_like=True, fill_value=0.0, primfunc_name="zeros")
+)
+
+
 def _tril_triu(is_upper: bool, primfunc_name: str) -> LegalizeFunc:
     def tril_triu_call_te(bb: BlockBuilder, call: Call) -> Expr:
         return bb.call_te(
@@ -142,9 +213,13 @@ def _tril_triu(is_upper: bool, primfunc_name: str) -> LegalizeFunc:
     return tril_triu_call_te
 
 
+register_default_legalize_func("relax.tril", _tril_triu(is_upper=False, primfunc_name="tril"))
+register_default_legalize_func("relax.triu", _tril_triu(is_upper=True, primfunc_name="triu"))
+
 ##################### Datatype #####################
 
 
+@register_default_legalize_func("relax.astype")
 def _astype(bb: BlockBuilder, call: Call) -> Expr:
     arg = try_convert_to_scalar_const(call.args[0])
     if isinstance(arg, Expr):  # type: ignore
@@ -156,6 +231,7 @@ def _astype(bb: BlockBuilder, call: Call) -> Expr:
 ##################### Indexing #####################
 
 
+@register_default_legalize_func("relax.take")
 def _take(bb: BlockBuilder, call: Call) -> Expr:
     # Currently Relax `take` operator doesn't provide the mode choices and
     # requires input indices to be in range.
@@ -164,6 +240,7 @@ def _take(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.take, call.args[0], call.args[1], call.attrs.axis, mode="fast")
 
 
+@register_default_legalize_func("relax.strided_slice")
 def _strided_slice(bb: BlockBuilder, call: Call) -> Expr:
     if not all(
         [
@@ -191,6 +268,7 @@ def _strided_slice(bb: BlockBuilder, call: Call) -> Expr:
 ##################### Linear algebra #####################
 
 
+@register_default_legalize_func("relax.matmul")
 def _matmul(bb: BlockBuilder, call: Call) -> Expr:
     def te_matmul(a: te.Tensor, b: te.Tensor) -> te.Tensor:
         a_shape = list(a.shape)
@@ -268,6 +346,20 @@ def _reshape(
     return reshape_call_te
 
 
+register_default_legalize_func("relax.broadcast_to", _reshape(topi.broadcast_to, "broadcast_to"))
+register_default_legalize_func("relax.reshape", _reshape(topi.reshape, "reshape"))
+# # Todo(relax-team): Introduce TOPI collapse_sum for gradient
+# register_default_legalize_func(
+#     "relax.collapse_sum_like",
+#     _reshape(topi.collapse_sum, "collapse_sum"),
+# )
+# register_default_legalize_func(
+#     "relax.collapse_sum_to",
+#     _reshape(topi.collapse_sum, "collapse_sum", is_collapse_sum_like=True),
+# )
+
+
+@register_default_legalize_func("relax.concat")
 def _concat(bb: BlockBuilder, call: Call) -> Expr:
     t = call.args[0]
     n_field = len(t.struct_info.fields)
@@ -286,6 +378,7 @@ def _concat(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.expand_dims")
 def _expand_dims(bb: BlockBuilder, call: Call) -> Expr:
     def te_expand_dims(data, axis):
         data_relax = relax.Var("data", relax.TensorStructInfo(data.shape))
@@ -308,14 +401,17 @@ def _expand_dims(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.flatten")
 def _flatten(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.reshape, call.args[0], call.struct_info.shape.values)
 
 
+@register_default_legalize_func("relax.permute_dims")
 def _permute_dims(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.transpose, call.args[0], call.attrs.axes)
 
 
+@register_default_legalize_func("relax.split")
 def _split(bb: BlockBuilder, call: Call) -> Expr:
     if isinstance(call.attrs.indices_or_sections, tir.IntImm):
         indices_or_sections = call.attrs.indices_or_sections.value
@@ -333,6 +429,7 @@ def _split(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.split, call.args[0], indices_or_sections, call.attrs.axis)
 
 
+@register_default_legalize_func("relax.squeeze")
 def _squeeze(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.squeeze, call.args[0], call.attrs.axis)
 
@@ -340,6 +437,7 @@ def _squeeze(bb: BlockBuilder, call: Call) -> Expr:
 ##################### Search #####################
 
 
+@register_default_legalize_func("relax.where")
 def _where(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.where, call.args[0], call.args[1], call.args[2])
 
@@ -352,6 +450,12 @@ def _statistical(te_func: TEFunc) -> LegalizeFunc:
         return bb.call_te(te_func, call.args[0], call.attrs.axis, call.attrs.keepdims)
 
     return statistical_call_te
+
+
+register_default_legalize_func("relax.max", _statistical(topi.max))
+register_default_legalize_func("relax.min", _statistical(topi.min))
+register_default_legalize_func("relax.prod", _statistical(topi.prod))
+register_default_legalize_func("relax.sum", _statistical(topi.sum))
 
 
 def _compute_shape_prod(x: te.Tensor, axis: List[tir.IntImm]) -> tir.PrimExpr:
@@ -373,12 +477,14 @@ def _te_variance(x: te.Tensor, axis: List[tir.IntImm], keepdims: bool) -> te.Ten
     return _te_mean(dev * dev, axis, keepdims)
 
 
+@register_default_legalize_func("relax.mean")
 def _mean(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(
         _te_mean, call.args[0], call.attrs.axis, call.attrs.keepdims, primfunc_name_hint="mean"
     )
 
 
+@register_default_legalize_func("relax.std")
 def _std(bb: BlockBuilder, call: Call) -> Expr:
     def te_std(x: te.Tensor, axis: List[tir.IntImm], keepdims: bool) -> te.Tensor:
         return topi.sqrt(_te_variance(x, axis, keepdims))
@@ -388,6 +494,7 @@ def _std(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.variance")
 def _variance(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(
         _te_variance,
@@ -401,6 +508,7 @@ def _variance(bb: BlockBuilder, call: Call) -> Expr:
 ##################### Neural network #####################
 
 
+@register_default_legalize_func("relax.nn.conv2d")
 def _nn_conv2d(bb: BlockBuilder, call: Call) -> Expr:
     if call.attrs.out_layout != call.attrs.data_layout:
         logging.info(
@@ -441,6 +549,7 @@ def _nn_conv2d(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.nn.max_pool2d")
 def _nn_max_pool2d(bb: BlockBuilder, call: Call) -> Expr:
     if call.attrs.out_layout != call.attrs.layout:
         logging.info(
@@ -463,7 +572,8 @@ def _nn_max_pool2d(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
-def _nn_adaptive_max_pool2d(bb: BlockBuilder, call: Call) -> Expr:
+@register_default_legalize_func("relax.nn.adaptive_avg_pool2d")
+def _nn_adaptive_avg_pool2d(bb: BlockBuilder, call: Call) -> Expr:
     if call.attrs.out_layout != call.attrs.layout:
         logging.info(
             "TOPI adaptive_max_pool2d does not support different input-output "
@@ -490,10 +600,12 @@ def _nn_adaptive_max_pool2d(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.nn.relu")
 def _nn_relu(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.nn.relu, call.args[0])
 
 
+@register_default_legalize_func("relax.nn.gelu")
 def _nn_gelu(bb: BlockBuilder, call: Call) -> Expr:
     def gelu(x: te.Tensor):
         dtype = x.dtype
@@ -505,6 +617,7 @@ def _nn_gelu(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(gelu, call.args[0], primfunc_name_hint="gelu")
 
 
+@register_default_legalize_func("relax.nn.silu")
 def _nn_silu(bb: BlockBuilder, call: Call) -> Expr:
     def te_silu(x: te.Tensor):
         return topi.multiply(x, topi.sigmoid(x))
@@ -512,10 +625,12 @@ def _nn_silu(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(te_silu, call.args[0], primfunc_name_hint="silu")
 
 
+@register_default_legalize_func("relax.nn.softmax")
 def _nn_softmax(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(topi.nn.softmax, call.args[0], call.attrs.axis)
 
 
+@register_default_legalize_func("relax.nn.batch_norm")
 def _nn_batch_norm(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(
         topi.nn.batch_norm,
@@ -531,6 +646,7 @@ def _nn_batch_norm(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.nn.layer_norm")
 def _nn_layer_norm(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(
         topi.nn.layer_norm,
@@ -542,6 +658,7 @@ def _nn_layer_norm(bb: BlockBuilder, call: Call) -> Expr:
     )
 
 
+@register_default_legalize_func("relax.nn.dropout")
 def _nn_dropout(bb: BlockBuilder, call: Call) -> Expr:
     logging.info("Dropout is handled by frontend translator at this moment and is not legalized.")
     return call
@@ -550,6 +667,7 @@ def _nn_dropout(bb: BlockBuilder, call: Call) -> Expr:
 ##################### Image #####################
 
 
+@register_default_legalize_func("relax.image.resize2d")
 def _image_resize2d(bb: BlockBuilder, call: Call) -> Expr:
     return bb.call_te(
         topi.image.resize2d,
@@ -570,86 +688,9 @@ def _image_resize2d(bb: BlockBuilder, call: Call) -> Expr:
 
 
 # Todo(relax-team): Introduce cumsum for GPT-2
+# @register_default_legalize_func("relax.cumsum")
 # def _cumsum(bb: BlockBuilder, call: Call):
 #     return bb.call_te(topi.cumsum, args[0], attrs.axis)
-
-
-DEFAULT_OP_LEGALIZE_MAP: Dict[str, LegalizeFunc] = {
-    # Arithmetic and comparison
-    "relax.cos": _unary(topi.cos),
-    "relax.log": _unary(topi.log),
-    "relax.negative": _unary(topi.negative),
-    "relax.sigmoid": _unary(topi.sigmoid),
-    "relax.sin": _unary(topi.sin),
-    "relax.sqrt": _unary(topi.sqrt),
-    "relax.tanh": _unary(topi.tanh),
-    "relax.add": _binary(topi.add),
-    "relax.divide": _binary(topi.divide),
-    "relax.floor_divide": _binary(topi.floor_divide),
-    "relax.multiply": _binary(topi.multiply),
-    "relax.subtract": _binary(topi.subtract),
-    "relax.equal": _binary(topi.equal),
-    "relax.greater": _binary(topi.greater),
-    "relax.greater_equal": _binary(topi.greater_equal),
-    "relax.less": _binary(topi.less),
-    "relax.less_equal": _binary(topi.less_equal),
-    "relax.not_equal": _binary(topi.not_equal),
-    # Creation
-    "relax.full": _full(is_like=False, fill_value=None, primfunc_name="full"),
-    "relax.full_like": _full(is_like=True, fill_value=None, primfunc_name="full"),
-    "relax.ones": _full(is_like=False, fill_value=1.0, primfunc_name="ones"),
-    "relax.ones_like": _full(is_like=True, fill_value=1.0, primfunc_name="ones"),
-    "relax.zeros": _full(is_like=False, fill_value=0.0, primfunc_name="zeros"),
-    "relax.zeros_like": _full(is_like=True, fill_value=0.0, primfunc_name="zeros"),
-    "relax.tril": _tril_triu(is_upper=False, primfunc_name="tril"),
-    "relax.triu": _tril_triu(is_upper=True, primfunc_name="triu"),
-    # Datatype
-    "relax.astype": _astype,
-    # Indexing
-    "relax.take": _take,
-    "relax.strided_slice": _strided_slice,
-    # Linear algebra
-    "relax.matmul": _matmul,
-    # Manipulation
-    "relax.broadcast_to": _reshape(topi.broadcast_to, "broadcast_to"),
-    "relax.concat": _concat,
-    "relax.expand_dims": _expand_dims,
-    "relax.flatten": _flatten,
-    "relax.permute_dims": _permute_dims,
-    "relax.reshape": _reshape(topi.reshape, "reshape"),
-    "relax.split": _split,
-    "relax.squeeze": _squeeze,
-    # Todo(relax-team): Introduce TOPI collapse_sum for gradient
-    # "relax.collapse_sum_like": _reshape(topi.collapse_sum, "collapse_sum"),
-    # "relax.collapse_sum_to": _reshape(
-    #     topi.collapse_sum, "collapse_sum", is_collapse_sum_like=True
-    # ),
-    # Search
-    "relax.where": _where,
-    # Statistical
-    "relax.max": _statistical(topi.max),
-    "relax.mean": _mean,
-    "relax.min": _statistical(topi.min),
-    "relax.prod": _statistical(topi.prod),
-    "relax.std": _std,
-    "relax.sum": _statistical(topi.sum),
-    "relax.variance": _variance,
-    # Neural network
-    "relax.nn.conv2d": _nn_conv2d,
-    "relax.nn.max_pool2d": _nn_max_pool2d,
-    "relax.nn.adaptive_avg_pool2d": _nn_adaptive_max_pool2d,
-    "relax.nn.relu": _nn_relu,
-    "relax.nn.gelu": _nn_gelu,
-    "relax.nn.silu": _nn_silu,
-    "relax.nn.softmax": _nn_softmax,
-    "relax.nn.batch_norm": _nn_batch_norm,
-    "relax.nn.layer_norm": _nn_layer_norm,
-    "relax.nn.dropout": _nn_dropout,
-    # Image
-    "relax.image.resize2d": _image_resize2d,
-    # Todo(relax-team): Introduce cumsum for GPT-2
-    # "relax.cumsum": _cumsum,
-}
 
 
 @tvm.transform.module_pass(opt_level=3, name="LegalizeOps")
