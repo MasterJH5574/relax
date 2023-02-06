@@ -229,13 +229,17 @@ def test_relu():
 
     torch.set_grad_enabled(False)
 
-    class ReLU(Module):
+    class ReLU0(Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
 
         def forward(self, input):
             return self.relu(input)
+
+    class ReLU1(Module):
+        def forward(self, input):
+            return torch.nn.functional.relu(input)
 
     @tvm.script.ir_module
     class expected:
@@ -251,7 +255,8 @@ def test_relu():
             return gv
 
     input_info = [([10, 10], "float32")]
-    verify_model(ReLU(), input_info, {}, expected)
+    verify_model(ReLU0(), input_info, {}, expected)
+    verify_model(ReLU1(), input_info, {}, expected)
 
 
 @tvm.testing.requires_gpu
@@ -396,13 +401,17 @@ def test_adaptive_avgpool2d():
 
     input_info = [([1, 3, 10, 10], "float32")]
 
-    class AdaptiveAvgPool2d(Module):
+    class AdaptiveAvgPool2d0(Module):
         def __init__(self):
             super().__init__()
             self.pool = torch.nn.AdaptiveAvgPool2d([10, 10])
 
         def forward(self, input):
             return self.pool(input)
+
+    class AdaptiveAvgPool2d1(Module):
+        def forward(self, input):
+            return torch.nn.functional.adaptive_avg_pool2d(input, [10, 10])
 
     @tvm.script.ir_module
     class expected1:
@@ -419,7 +428,8 @@ def test_adaptive_avgpool2d():
                 R.output(gv)
             return gv
 
-    verify_model(AdaptiveAvgPool2d(), input_info, {}, expected1)
+    verify_model(AdaptiveAvgPool2d0(), input_info, {}, expected1)
+    verify_model(AdaptiveAvgPool2d1(), input_info, {}, expected1)
 
 
 @tvm.testing.requires_gpu
