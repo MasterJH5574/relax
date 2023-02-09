@@ -1763,7 +1763,7 @@ def test_mixed_precision():
                 R.output(gv)
             return gv
 
-    input_info = {"input_1": ([1, 3, 10, 10], "float32")}
+    input_info = [([1, 3, 10, 10], "float32")]
     model = Dense1().half()
     binding = {"w1": model.linear.weight.numpy(), "w2": model.linear.bias.numpy()}
     verify_model(model, input_info, binding, expected1)
@@ -1807,7 +1807,7 @@ def test_mixed_precision():
                 R.output(gv)
             return gv
 
-    input_info = {"input_1": ([1, 3, 10, 10], "float32")}
+    input_info = [([1, 3, 10, 10], "float32")]
 
     model = Conv2D1().half()
     binding = {"w1": model.conv.weight.numpy(), "w2": model.conv.bias.numpy()}
