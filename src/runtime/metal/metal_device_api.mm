@@ -219,7 +219,8 @@ void MetalWorkspace::CopyDataFromTo(const void* from, size_t from_offset, void* 
     if (dev_from.device_type == kDLCPU) dev = dev_to;
     Stream* s = CastStreamOrGetCurrent(stream, dev.device_id);
     if (s->HasErrorHappened()) {
-      LOG(FATAL) << "Error! Some problems on GPU happaned! Cannot copy data to current stream";
+      LOG(FATAL) << "Error! Some problems on GPU happaned! Cannot copy data to current stream\n"
+                 << s->description_msg << "\n" << s->reason_msg;
     }
     id<MTLCommandBuffer> cb = s->GetCommandBuffer();
     int from_dev_type = static_cast<int>(dev_from.device_type);

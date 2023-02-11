@@ -255,9 +255,9 @@ def get_loggers_from_work_dir(
     log_dir = osp.join(work_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     pattern = __name__ + ".task_{i:0" + f"{len(str(len(task_names) - 1))}" + "d}_{name}"
-    loggers = [pattern.format(i=i, name=name) for i, name in enumerate(task_names)]
+    loggers = [pattern.format(i=0, name="_") for i, name in enumerate(task_names)]
     create_loggers(
         log_dir=log_dir,
-        params=[{"log_dir": log_dir, "logger_name": logger} for logger in loggers],
+        params=[{"log_dir": log_dir, "logger_name": loggers[0]}],
     )
-    return [get_logger(logger) for logger in loggers]
+    return [get_logger(loggers[0]) for logger in loggers]

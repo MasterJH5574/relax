@@ -113,11 +113,19 @@ class Stream {
   id<MTLCommandBuffer> GetCommandBuffer() {
     id<MTLCommandBuffer> cb = [queue_ commandBuffer];
     [cb addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-      if (buffer.status == MTLCommandBufferStatusError) SetErrorStatus();
+      if (buffer.status == MTLCommandBufferStatusError) {
+        SetErrorStatus();
+        NSError* error_msg = buffer.error;
+        description_msg = [[error_msg localizedDescription] UTF8String];
+        reason_msg = [[error_msg localizedFailureReason] UTF8String];
+      }
     }];
     return cb;
   }
   bool HasErrorHappened() { return error_happened_; }
+
+  String description_msg;
+  String reason_msg;
 
  private:
   void SetErrorStatus() { error_happened_ = true; }
